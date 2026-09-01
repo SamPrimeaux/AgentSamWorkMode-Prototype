@@ -80,7 +80,7 @@ function appendRuntimeContext(
  * - pty_client is a per-browser identifier, not a user, lane, or terminal session id.
  */
 export function useTerminalBridge(options?: TerminalBridgeOptions) {
-  const initialTarget = options?.targetType ?? readPreferredTerminalLane() ?? DEFAULT_TERMINAL_LANE;
+  const initialTarget = normalizeTargetType(options?.targetType ?? readPreferredTerminalLane());
   const [targetType, setTargetType] = useState<TerminalLaneTarget>(initialTarget);
   const [localConnectionActive, setLocalConnectionActive] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
