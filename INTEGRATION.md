@@ -26,6 +26,17 @@ A copy of the patch lives in this repo at `patches/remix-workmode-integration.pa
 | `app/workmode/hooks/useWorkModeGitBridge.ts` | Live git status |
 | `app/workmode/hooks/useWorkModeTelemetryBridge.ts` | Telemetry poll |
 | `app/workmode/hooks/useWorkModeShellBridge.ts` | Shell PTY via `IAM_TERMINAL_CONNECT` |
+| `app/workmode/components/WorkModeCommandPalette.tsx` | CF + gh Cmd+K palette (patch `0005`) |
+
+## Work Mode command palette (patch 0005)
+
+After applying patches through `0004` (gh CLI) and `0005` (workmode palette):
+
+```bash
+git am patches/0005-feat-workmode-cf-command-palette.patch
+npm run build
+# /dashboard/workmode → ⌘K or Cloud button in header
+```
 
 ## Real vs mock
 
