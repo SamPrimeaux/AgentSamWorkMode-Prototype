@@ -1,0 +1,1178 @@
+From 20e1aa87c83da7b06d409e6091c4c78e4268ded1 Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Tue, 1 Sep 2026 16:04:28 +0000
+Subject: [PATCH] feat(gh): add GitHub CLI as first-class Cmd+K and agent tools
+
+Mirror the Wrangler catalog pattern for gh: static TS catalog, D1 seed
+migration, Cmd+K sections, terminal trust/policy, sandbox GH_TOKEN injection,
+lane-aware auth guidance API, and seven agentsam_gh_* command-fabric tools.
+---
+ app/components/UnifiedSearchBar.tsx           |  73 ++++-
+ app/lib/ghCommandCatalog.ts                   | 251 ++++++++++++++++++
+ app/src/lib/deployPaletteItems.ts             |  21 ++
+ backend/agentsam/terminal/command-trust.js    |   2 +-
+ .../1325_seed_gh_cli_commands_and_tools.sql   | 140 ++++++++++
+ package.json                                  |   2 +-
+ src/api/terminal-gh-guide.js                  |  71 +++++
+ src/core/agentsam-tools-catalog.js            |   3 +-
+ src/core/execution-resource-policy.js         |   2 +-
+ src/core/gh-terminal-guidance.js              | 234 ++++++++++++++++
+ src/core/mcp-terminal-contract.js             |   2 +
+ src/core/mcp-tools-branded.js                 |   6 +-
+ src/core/production-dispatch.js               |   4 +
+ src/core/sandbox-github-git-helper.js         |  29 +-
+ test/gh-command-catalog.test.mjs              |  80 ++++++
+ 15 files changed, 900 insertions(+), 20 deletions(-)
+ create mode 100644 app/lib/ghCommandCatalog.ts
+ create mode 100644 migrations/1325_seed_gh_cli_commands_and_tools.sql
+ create mode 100644 src/api/terminal-gh-guide.js
+ create mode 100644 src/core/gh-terminal-guidance.js
+ create mode 100644 test/gh-command-catalog.test.mjs
+
+diff --git a/app/components/UnifiedSearchBar.tsx b/app/components/UnifiedSearchBar.tsx
+index 16e7946..4a3dcda 100644
+--- a/app/components/UnifiedSearchBar.tsx
++++ b/app/components/UnifiedSearchBar.tsx
+@@ -28,6 +28,13 @@ import {
+   type WranglerCatalogEntry,
+   type WranglerCommandCategory,
+ } from '../lib/wranglerCommandCatalog';
++import {
++  GH_CATEGORY_LABELS,
++  filterGhCatalog,
++  groupGhCatalog,
++  normalizeGhCommandRow,
++  type GhCatalogEntry,
++} from '../lib/ghCommandCatalog';
+ import { useWorkspace } from '../src/context/WorkspaceContext';
+ import {
+   databaseStudioPathFromName,
+@@ -102,7 +109,8 @@ type PaletteItem = {
+   fileColumn?: number;
+   deploySummary?: string;
+   deployAction?: 'workers_builds' | 'open_deploys';
+-  commandCategory?: WranglerCommandCategory;
++  commandCategory?: WranglerCommandCategory | string;
++  commandCategoryLabel?: string;
+   /** Unified-search row passthrough */
+   legacyRow?: LegacyUnifiedRow;
+   cloneRef?: string;
+@@ -267,6 +275,19 @@ function catalogEntryToPalette(c: WranglerCatalogEntry): PaletteItem {
+     subtitle: c.mapped_command,
+     commandText: c.mapped_command,
+     commandCategory: c.category,
++    commandCategoryLabel: WRANGLER_CATEGORY_LABELS[c.category],
++  };
++}
++
++function ghCatalogEntryToPalette(c: GhCatalogEntry): PaletteItem {
++  return {
++    id: c.id,
++    category: 'command',
++    title: c.display_name,
++    subtitle: c.mapped_command,
++    commandText: c.mapped_command,
++    commandCategory: c.category,
++    commandCategoryLabel: GH_CATEGORY_LABELS[c.category],
+   };
+ }
+ 
+@@ -274,16 +295,32 @@ function mergeCommandCatalog(
+   apiRows: Record<string, unknown>[],
+   searchTerm: string,
+   limit = 80,
+-): WranglerCatalogEntry[] {
+-  const byCmd = new Map<string, WranglerCatalogEntry>();
++): { wrangler: WranglerCatalogEntry[]; gh: GhCatalogEntry[] } {
++  const wrByCmd = new Map<string, WranglerCatalogEntry>();
++  const ghByCmd = new Map<string, GhCatalogEntry>();
++
+   for (const raw of apiRows) {
+-    const n = normalizeCommandRow(raw);
+-    if (n) byCmd.set(n.mapped_command.toLowerCase(), n);
++    const gh = normalizeGhCommandRow(raw);
++    if (gh) {
++      ghByCmd.set(gh.mapped_command.toLowerCase(), gh);
++      continue;
++    }
++    const wr = normalizeCommandRow(raw);
++    if (wr) wrByCmd.set(wr.mapped_command.toLowerCase(), wr);
+   }
++
+   for (const c of filterWranglerCatalog(searchTerm, limit)) {
+-    if (!byCmd.has(c.mapped_command.toLowerCase())) byCmd.set(c.mapped_command.toLowerCase(), c);
++    if (!wrByCmd.has(c.mapped_command.toLowerCase())) wrByCmd.set(c.mapped_command.toLowerCase(), c);
++  }
++  for (const c of filterGhCatalog(searchTerm, limit)) {
++    if (!ghByCmd.has(c.mapped_command.toLowerCase())) ghByCmd.set(c.mapped_command.toLowerCase(), c);
+   }
+-  return [...byCmd.values()].sort((a, b) => (a.sort_order ?? 50) - (b.sort_order ?? 0));
++
++  const sortFn = <T extends { sort_order?: number }>(a: T, b: T) => (a.sort_order ?? 50) - (b.sort_order ?? 50);
++  return {
++    wrangler: [...wrByCmd.values()].sort(sortFn),
++    gh: [...ghByCmd.values()].sort(sortFn),
++  };
+ }
+ 
+ function parseQueryMode(raw: string): { mode: QueryMode; term: string } {
+@@ -869,16 +906,24 @@ export const UnifiedSearchBar: React.FC<{
+ 
+       const merged = mergeCommandCatalog(apiRows, searchTerm, 80);
+       const deployRows = filterDeployPaletteRows(searchTerm).map(deployRowToPalette);
+-      const grouped = groupWranglerCatalog(merged);
++      const groupedWr = groupWranglerCatalog(merged.wrangler);
++      const groupedGh = groupGhCatalog(merged.gh);
+       const sections: CommandSection[] = [];
+       if (deployRows.length > 0) {
+         sections.push({ key: 'deploy', label: 'Deploy', rows: deployRows });
+       }
+-      for (const g of grouped) {
++      for (const g of groupedGh) {
++        sections.push({
++          key: `gh-${g.category}`,
++          label: `GitHub CLI · ${g.label}`,
++          rows: g.rows.map(ghCatalogEntryToPalette),
++        });
++      }
++      for (const g of groupedWr) {
+         sections.push({
+           key: g.category,
+           label: g.label,
+-          rows: g.rows.map(catalogEntryToPalette),
++          rows: g.rows.map((c) => catalogEntryToPalette(c)),
+         });
+       }
+ 
+@@ -2136,9 +2181,13 @@ export const UnifiedSearchBar: React.FC<{
+                               <span className="text-[9px] uppercase tracking-wide text-[var(--solar-cyan)] shrink-0">bound</span>
+                             ) : null}
+                           </div>
+-                          {item.commandCategory ? (
++                          {item.commandCategoryLabel ? (
++                            <div className="text-[9px] font-semibold uppercase tracking-wider text-[var(--solar-cyan)]/80">
++                              {item.commandCategoryLabel}
++                            </div>
++                          ) : item.commandCategory && WRANGLER_CATEGORY_LABELS[item.commandCategory as WranglerCommandCategory] ? (
+                             <div className="text-[9px] font-semibold uppercase tracking-wider text-[var(--solar-cyan)]/80">
+-                              {WRANGLER_CATEGORY_LABELS[item.commandCategory]}
++                              {WRANGLER_CATEGORY_LABELS[item.commandCategory as WranglerCommandCategory]}
+                             </div>
+                           ) : null}
+                           {item.subtitle ? (
+diff --git a/app/lib/ghCommandCatalog.ts b/app/lib/ghCommandCatalog.ts
+new file mode 100644
+index 0000000..b9eaed8
+--- /dev/null
++++ b/app/lib/ghCommandCatalog.ts
+@@ -0,0 +1,251 @@
++/**
++ * Canonical GitHub CLI (gh) commands for Cmd+K / agentsam_commands (platform scope).
++ * Keep in sync with migrations/1325_seed_gh_cli_commands_and_tools.sql
++ */
++
++export type GhCommandCategory =
++  | 'auth'
++  | 'pr'
++  | 'issue'
++  | 'repo'
++  | 'run'
++  | 'workflow'
++  | 'release'
++  | 'api'
++  | 'codespace'
++  | 'general';
++
++export type GhCatalogEntry = {
++  id: string;
++  slug: string;
++  display_name: string;
++  category: GhCommandCategory;
++  mapped_command: string;
++  description?: string;
++  risk_level?: 'low' | 'medium' | 'high';
++  requires_confirmation?: boolean;
++  sort_order?: number;
++};
++
++const destructive = /\b(delete|close|merge|cancel|archive|remove|revoke)\b/i;
++const write = /\b(create|push|edit|update|fork|upload|trigger|approve|add|comment|review)\b/i;
++
++function riskFor(cmd: string): 'low' | 'medium' | 'high' {
++  if (destructive.test(cmd)) return 'high';
++  if (write.test(cmd)) return 'medium';
++  return 'low';
++}
++
++function entry(
++  category: GhCommandCategory,
++  slug: string,
++  display_name: string,
++  mapped_command: string,
++  sort_order: number,
++  description?: string,
++): GhCatalogEntry {
++  const risk_level = riskFor(mapped_command);
++  return {
++    id: `cmd_gh_${slug.replace(/\//g, '_')}`,
++    slug: `/gh/${slug}`,
++    display_name,
++    category,
++    mapped_command,
++    description,
++    risk_level,
++    requires_confirmation: risk_level !== 'low',
++    sort_order,
++  };
++}
++
++/** User-facing section labels (Cmd+K grouping). */
++export const GH_CATEGORY_LABELS: Record<GhCommandCategory, string> = {
++  auth: 'Auth & setup',
++  pr: 'Pull requests',
++  issue: 'Issues',
++  repo: 'Repositories',
++  run: 'Actions runs',
++  workflow: 'Workflows',
++  release: 'Releases',
++  api: 'GitHub API',
++  codespace: 'Codespaces',
++  general: 'General',
++};
++
++export const GH_COMMAND_CATALOG: GhCatalogEntry[] = [
++  // Auth
++  entry('auth', 'auth-status', 'Auth status', 'gh auth status', 1, 'Verify gh login / token scopes.'),
++  entry('auth', 'auth-login', 'Login (browser)', 'gh auth login', 2, 'Interactive OAuth — local PTY only.'),
++  entry(
++    'auth',
++    'auth-login-token',
++    'Login (token)',
++    'gh auth login --with-token',
++    3,
++    'Pipe GH_TOKEN on stdin for headless / CI.',
++  ),
++  entry('auth', 'auth-token', 'Print token', 'gh auth token', 4, 'Requires gh auth with token scope.'),
++  entry('auth', 'auth-logout', 'Logout', 'gh auth logout', 5),
++  entry('auth', 'auth-setup-git', 'Setup git credentials', 'gh auth setup-git', 6),
++  entry('auth', 'auth-refresh', 'Refresh scopes', 'gh auth refresh', 7),
++
++  // Pull requests
++  entry('pr', 'pr-list', 'PR list', 'gh pr list --limit 30', 10),
++  entry('pr', 'pr-list-json', 'PR list (JSON)', 'gh pr list --json number,title,state,author,headRefName,baseRefName', 11),
++  entry('pr', 'pr-view', 'PR view', 'gh pr view <NUMBER>', 12),
++  entry('pr', 'pr-view-web', 'PR view in browser', 'gh pr view <NUMBER> --web', 13),
++  entry('pr', 'pr-diff', 'PR diff', 'gh pr diff <NUMBER>', 14),
++  entry('pr', 'pr-checkout', 'PR checkout', 'gh pr checkout <NUMBER>', 15),
++  entry('pr', 'pr-create', 'PR create', 'gh pr create --fill', 16, 'Opens editor or uses --title/--body flags.'),
++  entry(
++    'pr',
++    'pr-create-draft',
++    'PR create (draft)',
++    'gh pr create --draft --fill',
++    17,
++  ),
++  entry('pr', 'pr-merge', 'PR merge', 'gh pr merge <NUMBER> --merge', 18),
++  entry('pr', 'pr-merge-squash', 'PR merge (squash)', 'gh pr merge <NUMBER> --squash', 19),
++  entry('pr', 'pr-review', 'PR review', 'gh pr review <NUMBER> --approve', 20),
++  entry('pr', 'pr-comment', 'PR comment', 'gh pr comment <NUMBER> --body "<COMMENT>"', 21),
++  entry('pr', 'pr-checks', 'PR checks', 'gh pr checks <NUMBER>', 22),
++  entry('pr', 'pr-status', 'PR status (current branch)', 'gh pr status', 23),
++
++  // Issues
++  entry('issue', 'issue-list', 'Issue list', 'gh issue list --limit 30', 30),
++  entry('issue', 'issue-view', 'Issue view', 'gh issue view <NUMBER>', 31),
++  entry('issue', 'issue-create', 'Issue create', 'gh issue create --title "<TITLE>" --body "<BODY>"', 32),
++  entry('issue', 'issue-comment', 'Issue comment', 'gh issue comment <NUMBER> --body "<COMMENT>"', 33),
++  entry('issue', 'issue-close', 'Issue close', 'gh issue close <NUMBER>', 34),
++
++  // Repos
++  entry('repo', 'repo-view', 'Repo view', 'gh repo view', 40),
++  entry('repo', 'repo-view-json', 'Repo view (JSON)', 'gh repo view --json name,owner,defaultBranchRef,url', 41),
++  entry('repo', 'repo-clone', 'Repo clone', 'gh repo clone <OWNER/REPO>', 42),
++  entry('repo', 'repo-fork', 'Repo fork', 'gh repo fork <OWNER/REPO> --clone', 43),
++  entry('repo', 'repo-create', 'Repo create', 'gh repo create <NAME> --private --source=.', 44),
++  entry('repo', 'repo-sync', 'Repo sync fork', 'gh repo sync', 45),
++
++  // Actions runs
++  entry('run', 'run-list', 'Workflow runs list', 'gh run list --limit 20', 50),
++  entry('run', 'run-view', 'Run view', 'gh run view <RUN_ID>', 51),
++  entry('run', 'run-watch', 'Run watch', 'gh run watch <RUN_ID>', 52),
++  entry('run', 'run-rerun', 'Run rerun', 'gh run rerun <RUN_ID>', 53),
++  entry('run', 'run-cancel', 'Run cancel', 'gh run cancel <RUN_ID>', 54),
++  entry('run', 'run-download', 'Run download artifacts', 'gh run download <RUN_ID>', 55),
++  entry('run', 'run-log', 'Run logs', 'gh run view <RUN_ID> --log', 56),
++
++  // Workflows
++  entry('workflow', 'workflow-list', 'Workflow list', 'gh workflow list', 60),
++  entry('workflow', 'workflow-view', 'Workflow view', 'gh workflow view <WORKFLOW>', 61),
++  entry('workflow', 'workflow-run', 'Trigger workflow', 'gh workflow run <WORKFLOW>', 62),
++  entry('workflow', 'workflow-enable', 'Enable workflow', 'gh workflow enable <WORKFLOW>', 63),
++  entry('workflow', 'workflow-disable', 'Disable workflow', 'gh workflow disable <WORKFLOW>', 64),
++
++  // Releases
++  entry('release', 'release-list', 'Release list', 'gh release list --limit 20', 70),
++  entry('release', 'release-view', 'Release view', 'gh release view <TAG>', 71),
++  entry(
++    'release',
++    'release-create',
++    'Release create',
++    'gh release create <TAG> --generate-notes',
++    72,
++  ),
++  entry('release', 'release-upload', 'Release upload', 'gh release upload <TAG> <FILE>', 73),
++  entry('release', 'release-delete', 'Release delete', 'gh release delete <TAG>', 74),
++
++  // GitHub API
++  entry('api', 'api-user', 'API — current user', 'gh api user', 80),
++  entry('api', 'api-repos', 'API — list repos', 'gh api user/repos --paginate', 81),
++  entry('api', 'api-prs', 'API — list PRs', 'gh api repos/{owner}/{repo}/pulls', 82),
++  entry(
++    'api',
++    'api-graphql',
++    'API — GraphQL',
++    'gh api graphql -f query=\'{ viewer { login } }\'',
++    83,
++  ),
++
++  // Codespaces
++  entry('codespace', 'codespace-list', 'Codespace list', 'gh codespace list', 90),
++  entry('codespace', 'codespace-create', 'Codespace create', 'gh codespace create', 91),
++  entry('codespace', 'codespace-ssh', 'Codespace SSH', 'gh codespace ssh -c <CODESPACE>', 92),
++  entry('codespace', 'codespace-stop', 'Codespace stop', 'gh codespace stop -c <CODESPACE>', 93),
++
++  // General
++  entry('general', 'version', 'Version', 'gh --version', 100),
++  entry('general', 'help', 'Help', 'gh help', 101),
++  entry('general', 'browse', 'Open repo in browser', 'gh browse', 102),
++  entry('general', 'gist-create', 'Create gist', 'gh gist create <FILE>', 103),
++  entry('general', 'label-list', 'Label list', 'gh label list', 104),
++  entry('general', 'search-code', 'Search code', 'gh search code "<QUERY>" --limit 20', 105),
++  entry('general', 'search-repos', 'Search repos', 'gh search repos "<QUERY>" --limit 20', 106),
++];
++
++export function filterGhCatalog(term: string, limit = 80): GhCatalogEntry[] {
++  const t = term.trim().toLowerCase();
++  const rows = !t
++    ? GH_COMMAND_CATALOG
++    : GH_COMMAND_CATALOG.filter((c) => {
++        const hay = `${c.display_name} ${c.mapped_command} ${c.category} ${c.slug}`.toLowerCase();
++        return hay.includes(t);
++      });
++  return rows.slice(0, limit);
++}
++
++export function groupGhCatalog(
++  rows: GhCatalogEntry[],
++): { category: GhCommandCategory; label: string; rows: GhCatalogEntry[] }[] {
++  const order: GhCommandCategory[] = [
++    'auth',
++    'pr',
++    'issue',
++    'repo',
++    'run',
++    'workflow',
++    'release',
++    'api',
++    'codespace',
++    'general',
++  ];
++  const byCat = new Map<GhCommandCategory, GhCatalogEntry[]>();
++  for (const r of rows) {
++    const list = byCat.get(r.category) || [];
++    list.push(r);
++    byCat.set(r.category, list);
++  }
++  return order
++    .filter((c) => byCat.has(c))
++    .map((c) => ({
++      category: c,
++      label: GH_CATEGORY_LABELS[c],
++      rows: (byCat.get(c) || []).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
++    }));
++}
++
++/** Normalize D1 / API rows onto gh catalog shape. */
++export function normalizeGhCommandRow(raw: Record<string, unknown>): GhCatalogEntry | null {
++  const mapped = String(raw.mapped_command || raw.shell_line || raw.command_template || '').trim();
++  if (!mapped) return null;
++  if (!/^gh(\s|$)/i.test(mapped) && !String(raw.slug || '').startsWith('/gh/')) return null;
++  const category = String(raw.category || 'general').toLowerCase() as GhCommandCategory;
++  const validCategories = Object.keys(GH_CATEGORY_LABELS) as GhCommandCategory[];
++  return {
++    id: String(raw.id || raw.slug || mapped),
++    slug: String(raw.slug || ''),
++    display_name: String(raw.display_name || raw.name || mapped),
++    category: validCategories.includes(category) ? category : 'general',
++    mapped_command: mapped,
++    description: raw.description != null ? String(raw.description) : undefined,
++    risk_level: (raw.risk_level as GhCatalogEntry['risk_level']) || riskFor(mapped),
++    requires_confirmation: Boolean(raw.requires_confirmation),
++    sort_order: typeof raw.sort_order === 'number' ? raw.sort_order : 50,
++  };
++}
++
++export function isGhCatalogEntry(row: { mapped_command?: string; slug?: string }): boolean {
++  const cmd = String(row.mapped_command || '').trim();
++  const slug = String(row.slug || '').trim();
++  return /^gh(\s|$)/i.test(cmd) || slug.startsWith('/gh/');
++}
+diff --git a/app/src/lib/deployPaletteItems.ts b/app/src/lib/deployPaletteItems.ts
+index e95b9ab..9508b69 100644
+--- a/app/src/lib/deployPaletteItems.ts
++++ b/app/src/lib/deployPaletteItems.ts
+@@ -62,6 +62,27 @@ const DEPLOY_PALETTE_ROWS: DeployPaletteRow[] = [
+     subtitle: 'Analytics — recent Workers Builds',
+     deployAction: 'open_deploys',
+   },
++  {
++    id: 'deploy-gh-pr-create',
++    category: 'command',
++    title: 'Create PR (gh)',
++    subtitle: 'gh pr create --fill',
++    commandText: 'gh pr create --fill',
++  },
++  {
++    id: 'deploy-gh-run-watch',
++    category: 'command',
++    title: 'Watch CI run (gh)',
++    subtitle: 'gh run watch',
++    commandText: 'gh run watch',
++  },
++  {
++    id: 'deploy-gh-auth-status',
++    category: 'command',
++    title: 'GitHub CLI auth status',
++    subtitle: 'gh auth status',
++    commandText: 'gh auth status',
++  },
+ ];
+ 
+ export function filterDeployPaletteRows(searchTerm: string, limit = 12): DeployPaletteRow[] {
+diff --git a/backend/agentsam/terminal/command-trust.js b/backend/agentsam/terminal/command-trust.js
+index 16bc475..4476881 100644
+--- a/backend/agentsam/terminal/command-trust.js
++++ b/backend/agentsam/terminal/command-trust.js
+@@ -1,7 +1,7 @@
+ // guard-dup-allow: backend command peel; legacy command callers migrate separately.
+ /** Shell-command trust authority: policy prefixes + exact per-user grants. */
+ export const DEFAULT_TRUSTED_SHELL_PREFIXES = Object.freeze([
+-  'git ', 'npm run ', 'npx wrangler ', 'python3 scripts/', 'python scripts/',
++  'git ', 'gh ', 'npm run ', 'npx wrangler ', 'python3 scripts/', 'python scripts/',
+   'node scripts/', 'bash scripts/', './scripts/', 'jq ', 'grep ', 'cd ', 'curl ',
+ ]);
+ 
+diff --git a/migrations/1325_seed_gh_cli_commands_and_tools.sql b/migrations/1325_seed_gh_cli_commands_and_tools.sql
+new file mode 100644
+index 0000000..b9b2c16
+--- /dev/null
++++ b/migrations/1325_seed_gh_cli_commands_and_tools.sql
+@@ -0,0 +1,140 @@
++-- Seed GitHub CLI (gh) commands + agent tools
++-- Keep in sync with app/lib/ghCommandCatalog.ts
++
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_auth-status', 'platform', '/gh/auth-status', 'Auth status', 'Verify gh login / token scopes.', 'shell', '', 'gh auth status', 'auth', 'low', 0, 'both', 1, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_auth-login', 'platform', '/gh/auth-login', 'Login (browser)', 'Interactive OAuth — local PTY only.', 'shell', '', 'gh auth login', 'auth', 'low', 0, 'both', 2, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_auth-token', 'platform', '/gh/auth-token', 'Print token', 'Requires gh auth with token scope.', 'shell', '', 'gh auth token', 'auth', 'low', 0, 'both', 4, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_auth-logout', 'platform', '/gh/auth-logout', 'Logout', NULL, 'shell', '', 'gh auth logout', 'auth', 'low', 0, 'both', 5, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_auth-setup-git', 'platform', '/gh/auth-setup-git', 'Setup git credentials', NULL, 'shell', '', 'gh auth setup-git', 'auth', 'low', 0, 'both', 6, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_auth-refresh', 'platform', '/gh/auth-refresh', 'Refresh scopes', NULL, 'shell', '', 'gh auth refresh', 'auth', 'low', 0, 'both', 7, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_pr-list', 'platform', '/gh/pr-list', 'PR list', NULL, 'shell', '', 'gh pr list --limit 30', 'pr', 'low', 0, 'both', 10, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_pr-list-json', 'platform', '/gh/pr-list-json', 'PR list (JSON)', NULL, 'shell', '', 'gh pr list --json number,title,state,author,headRefName,baseRefName', 'pr', 'low', 0, 'both', 11, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_pr-view', 'platform', '/gh/pr-view', 'PR view', NULL, 'shell', '', 'gh pr view <NUMBER>', 'pr', 'low', 0, 'both', 12, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_pr-view-web', 'platform', '/gh/pr-view-web', 'PR view in browser', NULL, 'shell', '', 'gh pr view <NUMBER> --web', 'pr', 'low', 0, 'both', 13, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_pr-diff', 'platform', '/gh/pr-diff', 'PR diff', NULL, 'shell', '', 'gh pr diff <NUMBER>', 'pr', 'low', 0, 'both', 14, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_pr-checkout', 'platform', '/gh/pr-checkout', 'PR checkout', NULL, 'shell', '', 'gh pr checkout <NUMBER>', 'pr', 'low', 0, 'both', 15, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_pr-create', 'platform', '/gh/pr-create', 'PR create', 'Opens editor or uses --title/--body flags.', 'shell', '', 'gh pr create --fill', 'pr', 'medium', 1, 'both', 16, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_pr-merge', 'platform', '/gh/pr-merge', 'PR merge', NULL, 'shell', '', 'gh pr merge <NUMBER> --merge', 'pr', 'high', 1, 'both', 18, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_pr-merge-squash', 'platform', '/gh/pr-merge-squash', 'PR merge (squash)', NULL, 'shell', '', 'gh pr merge <NUMBER> --squash', 'pr', 'high', 1, 'both', 19, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_pr-review', 'platform', '/gh/pr-review', 'PR review', NULL, 'shell', '', 'gh pr review <NUMBER> --approve', 'pr', 'medium', 1, 'both', 20, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_pr-comment', 'platform', '/gh/pr-comment', 'PR comment', NULL, 'shell', '', 'gh pr comment <NUMBER> --body "<COMMENT>"', 'pr', 'medium', 1, 'both', 21, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_pr-checks', 'platform', '/gh/pr-checks', 'PR checks', NULL, 'shell', '', 'gh pr checks <NUMBER>', 'pr', 'low', 0, 'both', 22, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_pr-status', 'platform', '/gh/pr-status', 'PR status (current branch)', NULL, 'shell', '', 'gh pr status', 'pr', 'low', 0, 'both', 23, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_issue-list', 'platform', '/gh/issue-list', 'Issue list', NULL, 'shell', '', 'gh issue list --limit 30', 'issue', 'low', 0, 'both', 30, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_issue-view', 'platform', '/gh/issue-view', 'Issue view', NULL, 'shell', '', 'gh issue view <NUMBER>', 'issue', 'low', 0, 'both', 31, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_issue-create', 'platform', '/gh/issue-create', 'Issue create', NULL, 'shell', '', 'gh issue create --title "<TITLE>" --body "<BODY>"', 'issue', 'medium', 1, 'both', 32, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_issue-comment', 'platform', '/gh/issue-comment', 'Issue comment', NULL, 'shell', '', 'gh issue comment <NUMBER> --body "<COMMENT>"', 'issue', 'medium', 1, 'both', 33, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_issue-close', 'platform', '/gh/issue-close', 'Issue close', NULL, 'shell', '', 'gh issue close <NUMBER>', 'issue', 'high', 1, 'both', 34, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_repo-view', 'platform', '/gh/repo-view', 'Repo view', NULL, 'shell', '', 'gh repo view', 'repo', 'low', 0, 'both', 40, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_repo-view-json', 'platform', '/gh/repo-view-json', 'Repo view (JSON)', NULL, 'shell', '', 'gh repo view --json name,owner,defaultBranchRef,url', 'repo', 'low', 0, 'both', 41, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_repo-clone', 'platform', '/gh/repo-clone', 'Repo clone', NULL, 'shell', '', 'gh repo clone <OWNER/REPO>', 'repo', 'low', 0, 'both', 42, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_repo-fork', 'platform', '/gh/repo-fork', 'Repo fork', NULL, 'shell', '', 'gh repo fork <OWNER/REPO> --clone', 'repo', 'medium', 1, 'both', 43, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_repo-create', 'platform', '/gh/repo-create', 'Repo create', NULL, 'shell', '', 'gh repo create <NAME> --private --source=.', 'repo', 'medium', 1, 'both', 44, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_repo-sync', 'platform', '/gh/repo-sync', 'Repo sync fork', NULL, 'shell', '', 'gh repo sync', 'repo', 'low', 0, 'both', 45, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_run-list', 'platform', '/gh/run-list', 'Workflow runs list', NULL, 'shell', '', 'gh run list --limit 20', 'run', 'low', 0, 'both', 50, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_run-view', 'platform', '/gh/run-view', 'Run view', NULL, 'shell', '', 'gh run view <RUN_ID>', 'run', 'low', 0, 'both', 51, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_run-watch', 'platform', '/gh/run-watch', 'Run watch', NULL, 'shell', '', 'gh run watch <RUN_ID>', 'run', 'low', 0, 'both', 52, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_run-rerun', 'platform', '/gh/run-rerun', 'Run rerun', NULL, 'shell', '', 'gh run rerun <RUN_ID>', 'run', 'low', 0, 'both', 53, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_run-cancel', 'platform', '/gh/run-cancel', 'Run cancel', NULL, 'shell', '', 'gh run cancel <RUN_ID>', 'run', 'high', 1, 'both', 54, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_run-download', 'platform', '/gh/run-download', 'Run download artifacts', NULL, 'shell', '', 'gh run download <RUN_ID>', 'run', 'low', 0, 'both', 55, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_run-log', 'platform', '/gh/run-log', 'Run logs', NULL, 'shell', '', 'gh run view <RUN_ID> --log', 'run', 'low', 0, 'both', 56, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_workflow-list', 'platform', '/gh/workflow-list', 'Workflow list', NULL, 'shell', '', 'gh workflow list', 'workflow', 'low', 0, 'both', 60, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_workflow-view', 'platform', '/gh/workflow-view', 'Workflow view', NULL, 'shell', '', 'gh workflow view <WORKFLOW>', 'workflow', 'low', 0, 'both', 61, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_workflow-run', 'platform', '/gh/workflow-run', 'Trigger workflow', NULL, 'shell', '', 'gh workflow run <WORKFLOW>', 'workflow', 'low', 0, 'both', 62, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_workflow-enable', 'platform', '/gh/workflow-enable', 'Enable workflow', NULL, 'shell', '', 'gh workflow enable <WORKFLOW>', 'workflow', 'low', 0, 'both', 63, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_workflow-disable', 'platform', '/gh/workflow-disable', 'Disable workflow', NULL, 'shell', '', 'gh workflow disable <WORKFLOW>', 'workflow', 'low', 0, 'both', 64, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_release-list', 'platform', '/gh/release-list', 'Release list', NULL, 'shell', '', 'gh release list --limit 20', 'release', 'low', 0, 'both', 70, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_release-view', 'platform', '/gh/release-view', 'Release view', NULL, 'shell', '', 'gh release view <TAG>', 'release', 'low', 0, 'both', 71, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_release-upload', 'platform', '/gh/release-upload', 'Release upload', NULL, 'shell', '', 'gh release upload <TAG> <FILE>', 'release', 'medium', 1, 'both', 73, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_release-delete', 'platform', '/gh/release-delete', 'Release delete', NULL, 'shell', '', 'gh release delete <TAG>', 'release', 'high', 1, 'both', 74, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_api-user', 'platform', '/gh/api-user', 'API — current user', NULL, 'shell', '', 'gh api user', 'api', 'low', 0, 'both', 80, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_api-repos', 'platform', '/gh/api-repos', 'API — list repos', NULL, 'shell', '', 'gh api user/repos --paginate', 'api', 'low', 0, 'both', 81, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_api-prs', 'platform', '/gh/api-prs', 'API — list PRs', NULL, 'shell', '', 'gh api repos/{owner}/{repo}/pulls', 'api', 'low', 0, 'both', 82, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_codespace-list', 'platform', '/gh/codespace-list', 'Codespace list', NULL, 'shell', '', 'gh codespace list', 'codespace', 'low', 0, 'both', 90, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_codespace-create', 'platform', '/gh/codespace-create', 'Codespace create', NULL, 'shell', '', 'gh codespace create', 'codespace', 'medium', 1, 'both', 91, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_codespace-ssh', 'platform', '/gh/codespace-ssh', 'Codespace SSH', NULL, 'shell', '', 'gh codespace ssh -c <CODESPACE>', 'codespace', 'low', 0, 'both', 92, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_codespace-stop', 'platform', '/gh/codespace-stop', 'Codespace stop', NULL, 'shell', '', 'gh codespace stop -c <CODESPACE>', 'codespace', 'low', 0, 'both', 93, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_version', 'platform', '/gh/version', 'Version', NULL, 'shell', '', 'gh --version', 'general', 'low', 0, 'both', 100, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_help', 'platform', '/gh/help', 'Help', NULL, 'shell', '', 'gh help', 'general', 'low', 0, 'both', 101, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_browse', 'platform', '/gh/browse', 'Open repo in browser', NULL, 'shell', '', 'gh browse', 'general', 'low', 0, 'both', 102, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_gist-create', 'platform', '/gh/gist-create', 'Create gist', NULL, 'shell', '', 'gh gist create <FILE>', 'general', 'medium', 1, 'both', 103, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_label-list', 'platform', '/gh/label-list', 'Label list', NULL, 'shell', '', 'gh label list', 'general', 'low', 0, 'both', 104, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_search-code', 'platform', '/gh/search-code', 'Search code', NULL, 'shell', '', 'gh search code "<QUERY>" --limit 20', 'general', 'low', 0, 'both', 105, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_search-repos', 'platform', '/gh/search-repos', 'Search repos', NULL, 'shell', '', 'gh search repos "<QUERY>" --limit 20', 'general', 'low', 0, 'both', 106, 1, unixepoch(), unixepoch());
++
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_auth-login-token', 'platform', '/gh/auth-login-token', 'Login (token)', 'Pipe GH_TOKEN on stdin for headless / CI.', 'shell', '', 'gh auth login --with-token', 'auth', 'low', 0, 'both', 3, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_pr-create-draft', 'platform', '/gh/pr-create-draft', 'PR create (draft)', NULL, 'shell', '', 'gh pr create --draft --fill', 'pr', 'medium', 1, 'both', 17, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_release-create', 'platform', '/gh/release-create', 'Release create', NULL, 'shell', '', 'gh release create <TAG> --generate-notes', 'release', 'medium', 1, 'both', 72, 1, unixepoch(), unixepoch());
++INSERT OR IGNORE INTO agentsam_commands (id, workspace_id, slug, display_name, description, handler_kind, handler_ref, shell_line, category, risk_level, requires_confirmation, surface, sort_order, is_active, created_at_unix, updated_at_unix) VALUES ('cmd_gh_api-graphql', 'platform', '/gh/api-graphql', 'API — GraphQL', NULL, 'shell', '', 'gh api graphql -f query=''{ viewer { login } }''', 'api', 'low', 0, 'both', 83, 1, unixepoch(), unixepoch());
++
++-- Agent-callable gh tools (command fabric → agentsam_commands slug)
++INSERT OR IGNORE INTO agentsam_tools (
++  id, tool_name, display_name, tool_category, handler_type, description, input_schema,
++  handler_config, intent_tags, modes_json, risk_level, requires_approval, is_active,
++  is_global, dispatch_target, handler_key, domain, capability_tier, created_at, updated_at
++) VALUES (
++  'ast_gh_run', 'agentsam_gh_run', 'GitHub CLI Run', 'gh.cli', 'git',
++  'Run an approved gh command by catalog slug (agentsam_commands).', '{"type":"object","additionalProperties":false,"properties":{"command_slug":{"type":"string","description":"Catalog slug e.g. /gh/pr-list"},"repo":{"type":"string","description":"Optional -R owner/repo for gh -R flag"}},"required":["command_slug"]}', '{"command_slug":"/gh/pr-list-json","auth_source":"user_oauth_tokens","provider":"github"}', '["gh","github","cli"]',
++  '["agent","plan","debug","multitask"]', 'low', 0, 1, 1, 'both',
++  'agentsam_gh_run', 'develop', 'common', unixepoch(), unixepoch()
++);
++INSERT OR IGNORE INTO agentsam_tools (
++  id, tool_name, display_name, tool_category, handler_type, description, input_schema,
++  handler_config, intent_tags, modes_json, risk_level, requires_approval, is_active,
++  is_global, dispatch_target, handler_key, domain, capability_tier, created_at, updated_at
++) VALUES (
++  'ast_gh_auth_status', 'agentsam_gh_auth_status', 'GitHub CLI Auth Status', 'gh.auth', 'git',
++  'Verify gh authentication and token scopes in the active terminal lane.', '{"type":"object","additionalProperties":false,"properties":{}}', '{"command_slug":"/gh/auth-status","auth_source":"user_oauth_tokens","provider":"github"}', '["gh","github","cli"]',
++  '["agent","plan","debug","multitask"]', 'low', 0, 1, 1, 'both',
++  'agentsam_gh_auth_status', 'develop', 'common', unixepoch(), unixepoch()
++);
++INSERT OR IGNORE INTO agentsam_tools (
++  id, tool_name, display_name, tool_category, handler_type, description, input_schema,
++  handler_config, intent_tags, modes_json, risk_level, requires_approval, is_active,
++  is_global, dispatch_target, handler_key, domain, capability_tier, created_at, updated_at
++) VALUES (
++  'ast_gh_pr_list', 'agentsam_gh_pr_list', 'GitHub CLI PR List', 'gh.pr', 'git',
++  'List pull requests via gh pr list (JSON). Complements agentsam_github_pr_list REST tool.', '{"type":"object","additionalProperties":false,"properties":{"repo":{"type":"string","description":"Optional -R owner/repo"},"limit":{"type":"integer","default":30}}}', '{"command_slug":"/gh/pr-list-json","auth_source":"user_oauth_tokens","provider":"github"}', '["gh","github","cli"]',
++  '["agent","plan","debug","multitask"]', 'low', 0, 1, 1, 'both',
++  'agentsam_gh_pr_list', 'develop', 'common', unixepoch(), unixepoch()
++);
++INSERT OR IGNORE INTO agentsam_tools (
++  id, tool_name, display_name, tool_category, handler_type, description, input_schema,
++  handler_config, intent_tags, modes_json, risk_level, requires_approval, is_active,
++  is_global, dispatch_target, handler_key, domain, capability_tier, created_at, updated_at
++) VALUES (
++  'ast_gh_pr_create', 'agentsam_gh_pr_create', 'GitHub CLI PR Create', 'gh.pr', 'git',
++  'Create a pull request via gh pr create.', '{"type":"object","additionalProperties":false,"properties":{"title":{"type":"string"},"body":{"type":"string"},"draft":{"type":"boolean","default":false},"repo":{"type":"string"}}}', '{"command_slug":"/gh/pr-create","auth_source":"user_oauth_tokens","provider":"github"}', '["gh","github","cli"]',
++  '["agent","plan","debug","multitask"]', 'medium', 1, 1, 1, 'both',
++  'agentsam_gh_pr_create', 'develop', 'common', unixepoch(), unixepoch()
++);
++INSERT OR IGNORE INTO agentsam_tools (
++  id, tool_name, display_name, tool_category, handler_type, description, input_schema,
++  handler_config, intent_tags, modes_json, risk_level, requires_approval, is_active,
++  is_global, dispatch_target, handler_key, domain, capability_tier, created_at, updated_at
++) VALUES (
++  'ast_gh_pr_view', 'agentsam_gh_pr_view', 'GitHub CLI PR View', 'gh.pr', 'git',
++  'View pull request details via gh pr view.', '{"type":"object","additionalProperties":false,"properties":{"number":{"type":"integer"},"repo":{"type":"string"}},"required":["number"]}', '{"command_slug":"/gh/pr-view","auth_source":"user_oauth_tokens","provider":"github"}', '["gh","github","cli"]',
++  '["agent","plan","debug","multitask"]', 'low', 0, 1, 1, 'both',
++  'agentsam_gh_pr_view', 'develop', 'common', unixepoch(), unixepoch()
++);
++INSERT OR IGNORE INTO agentsam_tools (
++  id, tool_name, display_name, tool_category, handler_type, description, input_schema,
++  handler_config, intent_tags, modes_json, risk_level, requires_approval, is_active,
++  is_global, dispatch_target, handler_key, domain, capability_tier, created_at, updated_at
++) VALUES (
++  'ast_gh_run_list', 'agentsam_gh_run_list', 'GitHub CLI Actions Runs', 'gh.actions', 'git',
++  'List workflow runs via gh run list.', '{"type":"object","additionalProperties":false,"properties":{"repo":{"type":"string"},"limit":{"type":"integer","default":20}}}', '{"command_slug":"/gh/run-list","auth_source":"user_oauth_tokens","provider":"github"}', '["gh","github","cli"]',
++  '["agent","plan","debug","multitask"]', 'low', 0, 1, 1, 'both',
++  'agentsam_gh_run_list', 'develop', 'common', unixepoch(), unixepoch()
++);
++INSERT OR IGNORE INTO agentsam_tools (
++  id, tool_name, display_name, tool_category, handler_type, description, input_schema,
++  handler_config, intent_tags, modes_json, risk_level, requires_approval, is_active,
++  is_global, dispatch_target, handler_key, domain, capability_tier, created_at, updated_at
++) VALUES (
++  'ast_gh_workflow_run', 'agentsam_gh_workflow_run', 'GitHub CLI Trigger Workflow', 'gh.actions', 'git',
++  'Dispatch a workflow via gh workflow run.', '{"type":"object","additionalProperties":false,"properties":{"workflow":{"type":"string"},"repo":{"type":"string"},"ref":{"type":"string"}},"required":["workflow"]}', '{"command_slug":"/gh/workflow-run","auth_source":"user_oauth_tokens","provider":"github"}', '["gh","github","cli"]',
++  '["agent","plan","debug","multitask"]', 'medium', 1, 1, 1, 'both',
++  'agentsam_gh_workflow_run', 'develop', 'common', unixepoch(), unixepoch()
++);
+diff --git a/package.json b/package.json
+index 5fc7659..2d04989 100644
+--- a/package.json
++++ b/package.json
+@@ -11,7 +11,7 @@
+     "test:browser": "node --test test/browser-live-view.test.mjs test/terminal-vpc.test.mjs",
+     "test:settings": "node --test test/settings-control-plane.test.mjs",
+     "test:retrieval": "node --test test/retrieval-v1.test.mjs",
+-    "test:bin-lib": "node --test test/bin-lib.test.mjs",
++    "test:gh": "node --experimental-strip-types --test test/gh-command-catalog.test.mjs",
+     "test:terminal": "node --test test/terminal-vpc.test.mjs",
+     "eval:retrieval": "node scripts/eval-retrieval-v1.mjs",
+     "deploy": "node bin/agentsam deploy fast",
+diff --git a/src/api/terminal-gh-guide.js b/src/api/terminal-gh-guide.js
+new file mode 100644
+index 0000000..e24e523
+--- /dev/null
++++ b/src/api/terminal-gh-guide.js
+@@ -0,0 +1,71 @@
++/**
++ * GET /api/terminal/gh-guide — lane-aware GitHub CLI auth paths (no secrets).
++ */
++import { getAuthUser, jsonResponse } from '../core/auth.js';
++import {
++  GH_GENERAL_COMMANDS,
++  GH_DOCS_URL,
++  ghAuthGuideForLane,
++} from '../core/gh-terminal-guidance.js';
++import { probeMyContainer } from '../../backend/agentsam/sandbox/my-container.js';
++
++/**
++ * @param {Request} request
++ * @param {URL} url
++ * @param {any} env
++ */
++export async function handleTerminalGhGuide(request, url, env) {
++  if (request.method.toUpperCase() !== 'GET') {
++    return jsonResponse({ error: 'Method not allowed' }, 405);
++  }
++
++  const authUser = await getAuthUser(request, env);
++  if (!authUser) return jsonResponse({ error: 'Unauthorized' }, 401);
++
++  const laneParam = url.searchParams.get('lane') || 'sandbox';
++  const lane =
++    laneParam === 'local' || laneParam === 'remote' || laneParam === 'sandbox' || laneParam === 'auto'
++      ? laneParam
++      : 'sandbox';
++  const wantStatus =
++    url.searchParams.get('status') === '1' || url.searchParams.get('exec') === '1';
++
++  const guide = ghAuthGuideForLane(lane);
++  let probe = null;
++  let gh_auth_status = null;
++  if (lane === 'sandbox' && wantStatus) {
++    probe = await probeMyContainer(env);
++    if (probe.ok) {
++      const { prepareContainerGhCommand } = await import('../core/gh-terminal-guidance.js');
++      const { tryContainerExec } = await import('../../backend/agentsam/sandbox/my-container.js');
++      const prep = await prepareContainerGhCommand(
++        env,
++        authUser,
++        'gh auth status 2>&1',
++        'sandbox',
++      );
++      if (prep.ok) {
++        gh_auth_status = await tryContainerExec(env, {
++          command: prep.command,
++          cwd: '/tmp',
++          timeout_ms: 25_000,
++          authUser,
++          skip_gh_normalize: true,
++        });
++      } else {
++        gh_auth_status = { ok: false, error: prep.error, guidance: prep.guidance };
++      }
++    }
++  }
++
++  return jsonResponse({
++    ok: true,
++    docs: GH_DOCS_URL,
++    lane,
++    guide,
++    general_commands: GH_GENERAL_COMMANDS,
++    container_probe: probe,
++    gh_auth_status,
++    checked_at: Date.now(),
++  });
++}
+diff --git a/src/core/agentsam-tools-catalog.js b/src/core/agentsam-tools-catalog.js
+index f14186d..2207aec 100644
+--- a/src/core/agentsam-tools-catalog.js
++++ b/src/core/agentsam-tools-catalog.js
+@@ -34,7 +34,7 @@ function inferLaneFromMessage(message, modeSlug) {
+   const mode = String(modeSlug || '').toLowerCase();
+   if (/\b(browser|playwright|screenshot|inspect dom|devtools)\b/i.test(m)) return 'inspect';
+   if (/\b(cloud sandbox|my.container|container exec|batch exec)\b/i.test(m)) return 'terminal';
+-  if (/\b(sql|d1|database|github|terminal|wrangler|code|patch)\b/i.test(m)) return 'develop';
++  if (/\b(sql|d1|database|github|\bgh\b|terminal|wrangler|code|patch)\b/i.test(m)) return 'develop';
+   if (/\b(remember|recall|rag|search docs|embedding|context)\b/i.test(m)) return 'research';
+   if (mode === 'ask') return 'think';
+   return 'develop';
+@@ -76,6 +76,7 @@ export const EXECUTABLE_HANDLER_TYPES = new Set([
+   'cf',
+   'deploy',
+   'git',
++  'command',
+   'memory',
+   'notify',
+   'workflow',
+diff --git a/src/core/execution-resource-policy.js b/src/core/execution-resource-policy.js
+index e91cdb5..873f29f 100644
+--- a/src/core/execution-resource-policy.js
++++ b/src/core/execution-resource-policy.js
+@@ -17,7 +17,7 @@ const HEAVY_PATTERNS = [
+ ];
+ 
+ const LIGHT_PATTERNS = [
+-  /^\s*(?:git\s+(?:status|diff|log|show|branch|fetch|rev-parse|ls-files|worktree\s+list)|pwd|whoami|ls|find|grep|rg|sed|cat|head|tail|wc|df|du|free|ps)\b/i,
++  /^\s*(?:git\s+(?:status|diff|log|show|branch|fetch|rev-parse|ls-files|worktree\s+list)|gh\s+(?:auth\s+status|pr\s+(?:list|status|view|checks|diff)|run\s+(?:list|view)|workflow\s+list|repo\s+view|issue\s+list|api\s+user|--version|help)\b|pwd|whoami|ls|find|grep|rg|sed|cat|head|tail|wc|df|du|free|ps)\b/i,
+   /^\s*node\s+scripts\/(?:guard|assert|audit|smoke)[^\s]*\.m?js\b/i,
+   /^\s*npm\s+run\s+(?:guard|assert|audit|smoke)(?::[^\s]+)?\b/i,
+ ];
+diff --git a/src/core/gh-terminal-guidance.js b/src/core/gh-terminal-guidance.js
+new file mode 100644
+index 0000000..c5aed67
+--- /dev/null
++++ b/src/core/gh-terminal-guidance.js
+@@ -0,0 +1,234 @@
++/**
++ * GitHub CLI (gh) auth + lane guidance — mirrors wrangler-terminal-guidance.js.
++ * @see https://cli.github.com/manual/
++ *
++ * Lane law:
++ * - local (Mac PTY): gh auth login OAuth in browser
++ * - remote (GCP VM): GH_TOKEN / GITHUB_TOKEN from OAuth sync (headless)
++ * - sandbox (CF container): injected GH_TOKEN from user GitHub OAuth — never gh auth login OAuth
++ */
++
++/** @typedef {'local'|'remote'|'sandbox'|'auto'} TerminalAuthLane */
++
++export const GH_DOCS_URL = 'https://cli.github.com/manual/';
++
++/** General gh commands (Cmd+K + terminal help). */
++export const GH_GENERAL_COMMANDS = Object.freeze([
++  {
++    id: 'gh-docs',
++    label: 'Open gh manual',
++    command: 'gh help',
++    lane: 'all',
++    notes: 'Full CLI reference at cli.github.com.',
++  },
++  {
++    id: 'gh-version',
++    label: 'Version',
++    command: 'gh --version',
++    lane: 'all',
++  },
++  {
++    id: 'gh-auth-status',
++    label: 'Auth status',
++    command: 'gh auth status',
++    lane: 'all',
++    notes: 'Verify token scopes. Use --show-token in trusted environments only.',
++  },
++  {
++    id: 'gh-auth-login-local',
++    label: 'Login (local Mac only)',
++    command: 'gh auth login',
++    lane: 'local',
++    notes: 'Interactive OAuth in browser. Do not use in CF container sandbox.',
++  },
++  {
++    id: 'gh-auth-login-token',
++    label: 'Login with token (stdin)',
++    command: 'gh auth login --with-token',
++    lane: 'sandbox',
++    notes: 'Pipe GH_TOKEN on stdin for headless / CI.',
++  },
++  {
++    id: 'gh-auth-setup-git',
++    label: 'Setup git credentials',
++    command: 'gh auth setup-git',
++    lane: 'all',
++  },
++]);
++
++/**
++ * @param {string} command
++ */
++export function isGhCommand(command) {
++  return /(^|[\s;&|])gh(\s|$)/i.test(String(command || ''));
++}
++
++/**
++ * @param {string} command
++ */
++export function isGhLoginCommand(command) {
++  return /\bgh\s+auth\s+login\b/i.test(String(command || ''));
++}
++
++/**
++ * @param {TerminalAuthLane} lane
++ */
++export function ghAuthGuideForLane(lane) {
++  const l = String(lane || 'auto').trim().toLowerCase();
++  if (l === 'local') {
++    return {
++      lane: 'local',
++      title: 'GitHub CLI on your Mac',
++      summary: 'Run gh auth login once (OAuth). Then gh pr, gh run, gh repo from the local PTY.',
++      recommended: ['gh auth login', 'gh auth status', 'gh auth setup-git', 'gh pr list'],
++      avoid: ['Do not expect OAuth callback inside CF container.'],
++    };
++  }
++  if (l === 'remote') {
++    return {
++      lane: 'remote',
++      title: 'GitHub CLI on cloud desk (GCP)',
++      summary:
++        'Headless VM — export GH_TOKEN from OAuth sync or gh auth token. Prefer gh auth status before mutations.',
++      recommended: ['gh auth status', 'gh pr list', 'gh run list', 'gh repo view'],
++      avoid: ['gh auth login without browser tunnel unless using --with-token.'],
++    };
++  }
++  return {
++    lane: 'sandbox',
++    title: 'GitHub CLI in CF container sandbox',
++    summary:
++      'Agent Sam injects GH_TOKEN from your GitHub OAuth. Use gh auth status — not gh auth login OAuth.',
++    recommended: [
++      'gh auth status',
++      'gh pr list --json number,title,state',
++      'gh run list --limit 10',
++      'gh repo view --json name,url',
++    ],
++    avoid: [
++      'gh auth login (interactive OAuth hangs in container).',
++      'Use agentsam_github_* REST tools when gh is unavailable.',
++    ],
++    docs: GH_DOCS_URL,
++  };
++}
++
++/**
++ * Block or rewrite gh auth login per lane before container/remote exec.
++ * @param {string} command
++ * @param {TerminalAuthLane} lane
++ */
++export function normalizeGhCommandForLane(command, lane) {
++  const cmd = String(command || '').trim();
++  if (!cmd) return { ok: true, command: cmd };
++  if (!isGhLoginCommand(cmd)) return { ok: true, command: cmd };
++  if (/--with-token/i.test(cmd)) return { ok: true, command: cmd };
++
++  const l = String(lane || 'sandbox').trim().toLowerCase();
++  const guide = ghAuthGuideForLane(l === 'remote' ? 'remote' : l === 'local' ? 'local' : 'sandbox');
++
++  if (l === 'sandbox' || l === 'auto') {
++    return {
++      ok: false,
++      error:
++        'gh auth login OAuth does not work in CF sandbox. ' +
++        'Connect GitHub OAuth in Keys, then run: gh auth status',
++      guidance: guide,
++    };
++  }
++
++  return { ok: true, command: cmd };
++}
++
++/**
++ * Prefix shell exports for headless gh in container (per-user GitHub OAuth).
++ * @param {any} env
++ * @param {{ id?: string, user_id?: string, auth_id?: string }|null} authUser
++ */
++export async function buildContainerGhEnvPrefix(env, authUser) {
++  const userId = authUser?.id || authUser?.user_id || authUser?.auth_id;
++  if (!userId) return '';
++
++  const { resolveSandboxGithubToken } = await import('./sandbox-github-git-helper.js');
++  const tok = await resolveSandboxGithubToken(env, userId);
++  if (!tok?.token) return '';
++
++  const tokenQ = shellQuote(tok.token);
++  return [
++    `export GH_TOKEN=${tokenQ}`,
++    `export GITHUB_TOKEN=${tokenQ}`,
++    'export GIT_TERMINAL_PROMPT=0',
++  ].join(' && ');
++}
++
++/**
++ * @param {string} raw
++ */
++function shellQuote(raw) {
++  const s = String(raw || '');
++  if (!/[\s'"$`\\]/.test(s)) return s;
++  return `'${s.replace(/'/g, `'\\''`)}'`;
++}
++
++/**
++ * Apply env prefix + lane normalization to a container exec command.
++ * @param {any} env
++ * @param {{ id?: string, user_id?: string, auth_id?: string }|null} authUser
++ * @param {string} command
++ * @param {TerminalAuthLane} [lane]
++ */
++export async function prepareContainerGhCommand(env, authUser, command, lane = 'sandbox') {
++  const norm = normalizeGhCommandForLane(command, lane);
++  if (!norm.ok) {
++    return { ok: false, error: norm.error, guidance: norm.guidance };
++  }
++  const prefix = await buildContainerGhEnvPrefix(env, authUser);
++  const cmd = norm.command;
++  if (isGhCommand(cmd) && !prefix && !/^(gh\s+(auth\s+status|--version|help)\b)/i.test(cmd)) {
++    return {
++      ok: false,
++      error:
++        'GH_TOKEN could not be injected into the sandbox. Connect GitHub OAuth (Settings → Keys) or use agentsam_github_* REST tools.',
++      guidance: ghAuthGuideForLane('sandbox'),
++    };
++  }
++  if (!prefix) return { ok: true, command: cmd };
++  return { ok: true, command: `${prefix} && ${cmd}` };
++}
++
++/**
++ * gh-specific recovery hints appended to terminal tool output.
++ * @param {{ stdout?: string, stderr?: string, command?: string }} opts
++ */
++export function ghTerminalRecoveryHints(opts = {}) {
++  const text = `${opts.stdout ?? ''}\n${opts.stderr ?? ''}\n${opts.command ?? ''}`;
++  const hints = [];
++
++  if (/HTTP 401|Bad credentials|authentication required|GH_TOKEN|GITHUB_TOKEN|not logged in/i.test(text)) {
++    hints.push({
++      code: 'gh_auth_missing',
++      action:
++        'Connect GitHub OAuth in Settings → Keys, then gh auth status. Local: gh auth login. Sandbox: uses injected GH_TOKEN.',
++    });
++  }
++  if (/missing required scopes|insufficient scopes|403 Forbidden/i.test(text) && isGhCommand(opts.command || text)) {
++    hints.push({
++      code: 'gh_scope_missing',
++      action: 'Reconnect GitHub OAuth with repo/workflow scopes, or run: gh auth refresh -s repo,workflow',
++    });
++  }
++  if (/command not found.*\bgh\b/i.test(text)) {
++    hints.push({
++      code: 'gh_not_installed',
++      action: 'Install GitHub CLI: brew install gh (Mac) or see https://cli.github.com/',
++    });
++  }
++  if (/auth login.*device/i.test(text) && isGhLoginCommand(opts.command || text)) {
++    hints.push({
++      code: 'gh_login_device',
++      action: 'Device flow in sandbox may hang — use GH_TOKEN via OAuth or agentsam_github_* tools instead.',
++    });
++  }
++
++  return hints;
++}
+diff --git a/src/core/mcp-terminal-contract.js b/src/core/mcp-terminal-contract.js
+index 0f8a1bf..3e236c0 100644
+--- a/src/core/mcp-terminal-contract.js
++++ b/src/core/mcp-terminal-contract.js
+@@ -3,6 +3,7 @@
+  * Code wins at runtime; D1 agentsam_tools schemas kept in sync via migration.
+  */
+ import { wranglerTerminalRecoveryHints } from './wrangler-terminal-guidance.js';
++import { ghTerminalRecoveryHints } from './gh-terminal-guidance.js';
+ import { canonicalizeHostKind } from '../../backend/agentsam/terminal/terminal-binding.js';
+ 
+ /** @type {Record<string, unknown>} */
+@@ -415,6 +416,7 @@ export function terminalRecoveryHints(opts = {}) {
+   }
+ 
+   hints.push(...wranglerTerminalRecoveryHints(opts));
++  hints.push(...ghTerminalRecoveryHints(opts));
+ 
+   return hints;
+ }
+diff --git a/src/core/mcp-tools-branded.js b/src/core/mcp-tools-branded.js
+index dc5de44..8fe08fb 100644
+--- a/src/core/mcp-tools-branded.js
++++ b/src/core/mcp-tools-branded.js
+@@ -196,6 +196,10 @@ const ABSTRACT_CAPABILITY_TO_LANE = {
+   'wrangler.d1.write': 'data',
+   'wrangler.d1.migrate': 'data',
+   'wrangler.cli': 'terminal',
++  'gh.cli': 'terminal',
++  'gh.pr': 'develop',
++  'gh.actions': 'develop',
++  'gh.auth': 'develop',
+   'github.read': 'develop',
+   'github.write': 'develop',
+   'r2.read': 'develop',
+@@ -316,7 +320,7 @@ function inferMcpCapabilityLaneFromRegex(message, intentSlug, taskType, modeSlug
+   }
+   if (/\b(remember|recall|rag|search docs|embedding|context)\b/i.test(m) || tt === 'summary') return 'research';
+   if (
+-    /\b(sql|d1|database|github|terminal|wrangler|npm|code|diff|patch|refactor)\b/i.test(m) ||
++    /\b(sql|d1|database|github|\bgh\b|terminal|wrangler|npm|code|diff|patch|refactor)\b/i.test(m) ||
+     ['code', 'sql_d1_generation', 'terminal_execution', 'deploy', 'tool_use'].includes(tt)
+   ) {
+     return 'develop';
+diff --git a/src/core/production-dispatch.js b/src/core/production-dispatch.js
+index 5f5e57b..3cfacf4 100644
+--- a/src/core/production-dispatch.js
++++ b/src/core/production-dispatch.js
+@@ -295,6 +295,10 @@ export async function dispatchProductionDomainRoutes(rc) {
+     const { handleTerminalWranglerGuide } = await import('../api/terminal-wrangler-guide.js');
+     return handleTerminalWranglerGuide(request, url, env);
+   }
++  if (pathLower === '/api/terminal/gh-guide' && methodUpper === 'GET') {
++    const { handleTerminalGhGuide } = await import('../api/terminal-gh-guide.js');
++    return handleTerminalGhGuide(request, url, env);
++  }
+   if (pathLower.startsWith('/api/dashboard/home')) {
+     if (!authUser) return jsonResponse({ error: 'Unauthorized', code: 'SESSION_MISSING' }, 401);
+     const homeRes = await handleDashboardHomeApi(request, env, authUser, pathLower, methodUpper);
+diff --git a/src/core/sandbox-github-git-helper.js b/src/core/sandbox-github-git-helper.js
+index 20dd3f8..ceafb52 100644
+--- a/src/core/sandbox-github-git-helper.js
++++ b/src/core/sandbox-github-git-helper.js
+@@ -30,7 +30,26 @@ export function commandLooksLikeGit(command) {
+  * @param {string} command
+  */
+ export function commandNeedsGithubAuth(command) {
+-  return GIT_AUTH_NEEDED_RE.test(String(command || ''));
++  return GIT_AUTH_NEEDED_RE.test(String(command || '')) || commandNeedsGhAuth(command);
++}
++
++/**
++ * @param {string} command
++ */
++export function commandLooksLikeGh(command) {
++  return /(^|[\s;&|])gh(\s|$)/i.test(String(command || ''));
++}
++
++/**
++ * Most gh subcommands need a token; exclude interactive login and read-only help.
++ * @param {string} command
++ */
++export function commandNeedsGhAuth(command) {
++  const cmd = String(command || '').trim();
++  if (!commandLooksLikeGh(cmd)) return false;
++  if (/\bgh\s+auth\s+login\b/i.test(cmd) && !/--with-token/i.test(cmd)) return false;
++  if (/\bgh\s+(--version|help)\b/i.test(cmd)) return false;
++  return true;
+ }
+ 
+ /**
+@@ -143,6 +162,7 @@ export GIT_COMMITTER_EMAIL=${emailQ}
+ git config --global user.name ${nameQ} 2>/dev/null || true
+ git config --global user.email ${emailQ} 2>/dev/null || true` : `# no author email resolved`}
+ export GITHUB_TOKEN=${tokenQ}
++export GH_TOKEN=${tokenQ}
+ if [ -n "$GITHUB_TOKEN" ]; then
+   # Prefer HTTPS+token over missing container SSH keys
+   git config --global url."https://x-access-token:\${GITHUB_TOKEN}@github.com/".insteadOf "git@github.com:"
+@@ -172,10 +192,13 @@ export async function resolveSandboxGithubGitPreamble(env, opts) {
+     return { applied: false, preamble: '', reason: 'not_git' };
+   }
+ 
+-  const needsAuth = commandNeedsGithubAuth(command);
++  const needsAuth = commandNeedsGithubAuth(command) || commandNeedsGhAuth(command);
+   const needsAuthor = commandNeedsGitAuthor(command);
+   const author = await resolveGitAuthorIdentity(env, opts.userId, opts.authUser || null);
+-  const tok = needsAuth || needsAuthor ? await resolveSandboxGithubToken(env, opts.userId) : null;
++  const tok =
++    needsAuth || needsAuthor || commandLooksLikeGh(command)
++      ? await resolveSandboxGithubToken(env, opts.userId)
++      : null;
+ 
+   const preamble = buildSandboxGithubGitPreamble({
+     name: author?.name || null,
+diff --git a/test/gh-command-catalog.test.mjs b/test/gh-command-catalog.test.mjs
+new file mode 100644
+index 0000000..29a0978
+--- /dev/null
++++ b/test/gh-command-catalog.test.mjs
+@@ -0,0 +1,80 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import {
++  GH_COMMAND_CATALOG,
++  filterGhCatalog,
++  groupGhCatalog,
++  normalizeGhCommandRow,
++  isGhCatalogEntry,
++} from '../app/lib/ghCommandCatalog.ts';
++import {
++  isGhCommand,
++  isGhLoginCommand,
++  normalizeGhCommandForLane,
++  ghTerminalRecoveryHints,
++} from '../src/core/gh-terminal-guidance.js';
++
++test('gh catalog has core PR and auth commands', () => {
++  assert.ok(GH_COMMAND_CATALOG.length >= 50);
++  const names = GH_COMMAND_CATALOG.map((c) => c.mapped_command);
++  assert.ok(names.some((c) => c.startsWith('gh auth status')));
++  assert.ok(names.some((c) => c.startsWith('gh pr list')));
++  assert.ok(names.some((c) => c.startsWith('gh run list')));
++});
++
++test('filterGhCatalog finds pr commands', () => {
++  const rows = filterGhCatalog('pr merge', 20);
++  assert.ok(rows.length >= 1);
++  assert.ok(rows.every((r) => /pr|merge/i.test(`${r.display_name} ${r.mapped_command}`)));
++});
++
++test('groupGhCatalog preserves category order', () => {
++  const grouped = groupGhCatalog(GH_COMMAND_CATALOG);
++  assert.equal(grouped[0]?.category, 'auth');
++  assert.ok(grouped.some((g) => g.category === 'pr'));
++});
++
++test('normalizeGhCommandRow accepts D1 palette rows', () => {
++  const row = normalizeGhCommandRow({
++    id: 'cmd_gh_pr-list',
++    slug: '/gh/pr-list',
++    display_name: 'PR list',
++    shell_line: 'gh pr list',
++    category: 'pr',
++    sort_order: 10,
++  });
++  assert.ok(row);
++  assert.equal(row?.mapped_command, 'gh pr list');
++  assert.equal(row?.category, 'pr');
++});
++
++test('isGhCatalogEntry detects gh slugs', () => {
++  assert.equal(isGhCatalogEntry({ slug: '/gh/pr-list', mapped_command: '' }), true);
++  assert.equal(isGhCatalogEntry({ mapped_command: 'git status' }), false);
++});
++
++test('gh lane policy blocks interactive login in sandbox', () => {
++  const out = normalizeGhCommandForLane('gh auth login', 'sandbox');
++  assert.equal(out.ok, false);
++  assert.match(String(out.error), /sandbox/i);
++});
++
++test('gh lane policy allows token login in sandbox', () => {
++  const out = normalizeGhCommandForLane('gh auth login --with-token', 'sandbox');
++  assert.equal(out.ok, true);
++});
++
++test('gh terminal recovery hints for auth errors', () => {
++  const hints = ghTerminalRecoveryHints({
++    stderr: 'HTTP 401: Bad credentials',
++    command: 'gh pr list',
++  });
++  assert.ok(hints.some((h) => h.code === 'gh_auth_missing'));
++});
++
++test('isGhCommand and isGhLoginCommand', () => {
++  assert.equal(isGhCommand('gh pr list'), true);
++  assert.equal(isGhCommand('git status'), false);
++  assert.equal(isGhLoginCommand('gh auth login'), true);
++  assert.equal(isGhLoginCommand('gh auth status'), false);
++});
+-- 
+2.43.0
+
