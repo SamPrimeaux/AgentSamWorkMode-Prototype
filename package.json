@@ -13,7 +13,9 @@
     "deploy:pages": "npm run deploy",
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "promote:list": "bash bin/agentsam/step1-workmode-step2-remix.sh list",
+    "promote:pending": "bash bin/agentsam/step1-workmode-step2-remix.sh patch --pending"
   },
   "dependencies": {
     "@google/genai": "^1.43.0",
