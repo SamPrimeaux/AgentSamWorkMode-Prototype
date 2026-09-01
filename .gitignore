@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local clones / scratch (not part of prototype repo)
+AgentSamRemix/
+workmode-integration-patches/
+.wrangler/

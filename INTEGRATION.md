@@ -55,3 +55,33 @@ npm run build
 4. Presentations/websites → CMS + moviemode APIs
 
 See `app/workmode/README.md` in AgentSamRemix after applying the patch.
+
+## Preview the standalone Work Mode UI
+
+The Vite prototype in this repo can be deployed as a static SPA on Cloudflare Workers.
+
+### Local
+
+```bash
+npm install
+npm run dev          # full stack (Vite + express)
+npm run build:static && npm run preview   # static build only
+```
+
+### Deploy (your Cloudflare account)
+
+1. Add GitHub repo secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
+2. Push to `main` (or merge `cursor/deploy-workmode-preview-8edb`) — workflow `.github/workflows/deploy-preview.yml` runs `wrangler deploy`
+3. Or locally: `npm run deploy` after `wrangler login`
+
+Worker name: `agentsam-workmode-preview` → `https://agentsam-workmode-preview.<subdomain>.workers.dev`
+
+### Patches in this repo
+
+| Patch | Purpose |
+|-------|---------|
+| `0001` | Full Work Mode integration into AgentSamRemix |
+| `0002` | CLI pin + SDK forward |
+| `0003` | MCP bridge manifest |
+| `0004` | gh CLI Cmd+K + agent tools |
+| `0005` | Work Mode CF command palette |

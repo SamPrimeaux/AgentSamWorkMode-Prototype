@@ -1,0 +1,339 @@
+From 131820ae963c6a52d01bbdc19f16dda216bdb8df Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Tue, 1 Sep 2026 15:47:21 +0000
+Subject: [PATCH 3/3] feat(mcp): add bridge manifest, verify scripts, and build
+ export
+
+Add config/mcp-server/bridge.manifest.json and docs for wiring
+inneranimalmedia-mcp-server. CI verifies schema twins; build emits
+dist/mcp-bridge/manifest.json for MCP server consolidation.
+---
+ .github/workflows/ci.yml               |  6 +++
+ config/mcp-server/bridge.manifest.json | 66 ++++++++++++++++++++++++++
+ docs/platform/mcp-server-wiring.md     | 61 ++++++++++++++++++++++++
+ package.json                           |  4 +-
+ scripts/export-mcp-bridge-manifest.mjs | 50 +++++++++++++++++++
+ scripts/push-integration-branch.sh     | 27 +++++++++++
+ scripts/verify-mcp-schema-twins.mjs    | 39 +++++++++++++++
+ 7 files changed, 252 insertions(+), 1 deletion(-)
+ create mode 100644 config/mcp-server/bridge.manifest.json
+ create mode 100644 docs/platform/mcp-server-wiring.md
+ create mode 100644 scripts/export-mcp-bridge-manifest.mjs
+ create mode 100644 scripts/push-integration-branch.sh
+ create mode 100644 scripts/verify-mcp-schema-twins.mjs
+
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 865f81e..ee61f1f 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -38,6 +38,12 @@ jobs:
+       - name: Bin/lib portability tests
+         run: npm run test:bin-lib
+ 
++      - name: MCP bridge schema twins
++        run: npm run verify:mcp-bridge
++
++      - name: SDK CLI installed
++        run: npm run verify:sdk-cli
++
+       - name: Retrieval eval harness syntax
+         run: node --check scripts/eval-retrieval-v1.mjs
+ 
+diff --git a/config/mcp-server/bridge.manifest.json b/config/mcp-server/bridge.manifest.json
+new file mode 100644
+index 0000000..e4c391a
+--- /dev/null
++++ b/config/mcp-server/bridge.manifest.json
+@@ -0,0 +1,66 @@
++{
++  "schemaVersion": "agentsam-mcp-bridge-v1",
++  "description": "Wiring manifest for inneranimalmedia-mcp-server ↔ AgentSamRemix tool catalog",
++  "mcpServer": {
++    "serverKey": "inneranimalmedia-mcp-server",
++    "providerSlug": "inneranimalmedia-mcp-server",
++    "publicUrl": "https://mcp.inneranimalmedia.com/mcp",
++    "healthUrl": "https://mcp.inneranimalmedia.com/health",
++    "oauthAuthorizeUrl": "https://mcp.inneranimalmedia.com/api/oauth/authorize"
++  },
++  "remixWorker": {
++    "name": "agentsamremix",
++    "publicUrl": "https://agentsamremix.inneranimalmedia.com",
++    "toolCatalogTable": "agentsam_tools",
++    "mcpServersTable": "agentsam_mcp_servers",
++    "toolCallLogTable": "agentsam_tool_call_log"
++  },
++  "executionLanes": {
++    "catalogExecutor": "backend/services/tools/catalog-execution-runtime.js",
++    "mcpRowExecutor": "src/core/catalog-tool-mcp.js",
++    "mcpServerResolver": "src/core/mcp-servers.js",
++    "mcpToolExecution": "src/core/mcp-tool-execution.js"
++  },
++  "schemaTwins": [
++    {
++      "remixPath": "src/core/mcp-memory-search-schema.js",
++      "mcpServerPath": "src/mcp-memory-search-schema.js",
++      "exportName": "CANONICAL_AGENTSAM_MEMORY_SEARCH_INPUT_SCHEMA"
++    },
++    {
++      "remixPath": "src/core/mcp-memory-save-schema.js",
++      "mcpServerPath": "src/mcp-memory-save-schema.js",
++      "exportName": "CANONICAL_AGENTSAM_MEMORY_SAVE_INPUT_SCHEMA"
++    },
++    {
++      "remixPath": "src/core/mcp-plan-schema.js",
++      "mcpServerPath": "src/mcp-plan-schema.js",
++      "exportName": "CANONICAL_AGENTSAM_PLAN_INPUT_SCHEMA"
++    },
++    {
++      "remixPath": "src/core/mcp-github-public-schema.js",
++      "mcpServerPath": "src/mcp-github-public-schema.js",
++      "exportName": "agentsamGithubReadInputSchema"
++    },
++    {
++      "remixPath": "src/core/d1-write-contract.js",
++      "mcpServerPath": "src/mcp-d1-write-contract.js",
++      "exportName": "assertD1WriteContracts"
++    }
++  ],
++  "operatorCli": {
++    "hostWrapper": "bin/agentsam",
++    "sdkPackage": "@inneranimalmedia/agentsam-sdk",
++    "acpBridge": "bin/agentsam acp serve",
++    "verifyCommands": [
++      "npm run verify:sdk-cli",
++      "npm run verify:mcp-bridge",
++      "npm run test:bin-lib"
++    ]
++  },
++  "deployCommands": {
++    "frontendAndWorker": "npm run build && npm run deploy",
++    "workerOnly": "node bin/agentsam deploy worker",
++    "fast": "node bin/agentsam deploy fast"
++  }
++}
+diff --git a/docs/platform/mcp-server-wiring.md b/docs/platform/mcp-server-wiring.md
+new file mode 100644
+index 0000000..9025952
+--- /dev/null
++++ b/docs/platform/mcp-server-wiring.md
+@@ -0,0 +1,61 @@
++# inneranimalmedia-mcp-server ↔ AgentSamRemix wiring
++
++AgentSamRemix executes proven tools from the D1 catalog (`agentsam_tools`) and
++routes MCP-backed rows to registered servers in `agentsam_mcp_servers`. The
++canonical hosted MCP server is **inneranimalmedia-mcp-server** at
++`https://mcp.inneranimalmedia.com/mcp`.
++
++## Build & verify (run before deploy)
++
++```bash
++npm ci
++npm run verify:sdk-cli      # installed @inneranimalmedia/agentsam-sdk CLI
++npm run verify:mcp-bridge   # schema twin modules + bridge manifest
++npm run test:bin-lib
++npm run build               # Vite SPA + export MCP bridge artifact
++```
++
++After `npm run build`, import `dist/mcp-bridge/manifest.json` from
++**inneranimalmedia-mcp-server** to align tool schemas and server URLs.
++
++## Schema twins (must stay in sync)
++
++| AgentSamRemix | inneranimalmedia-mcp-server |
++|---------------|----------------------------|
++| `src/core/mcp-memory-search-schema.js` | `src/mcp-memory-search-schema.js` |
++| `src/core/mcp-memory-save-schema.js` | `src/mcp-memory-save-schema.js` |
++| `src/core/mcp-plan-schema.js` | `src/mcp-plan-schema.js` |
++| `src/core/mcp-github-public-schema.js` | `src/mcp-github-public-schema.js` |
++| `src/core/d1-write-contract.js` | `src/mcp-d1-write-contract.js` |
++
++CI runs `npm run verify:mcp-bridge` on every push.
++
++## Tool execution path
++
++```
++Agent chat → catalog-execution-runtime.js
++          → handler_type=mcp → catalog-tool-mcp.js
++          → resolveMcpServerForTool (agentsam_mcp_servers)
++          → POST inneranimalmedia-mcp-server /mcp (tools/call)
++          → agentsam_tool_call_log telemetry
++```
++
++## Operator CLI
++
++```bash
++npm run agentsam -- sdk status
++npm run agentsam -- context --json
++npm run agentsam -- acp serve          # stdio ACP bridge → Agent Sam API
++npm run agentsam -- deploy fast        # Remix Worker + assets
++```
++
++Portable SDK verbs delegate to `@inneranimalmedia/agentsam-sdk` (pinned from
++GitHub in `package.json` until npm alpha catches up).
++
++## MCP server repo consolidation checklist
++
++1. Copy or diff schema twins listed in `config/mcp-server/bridge.manifest.json`
++2. Register server row: `server_key = inneranimalmedia-mcp-server`, `url = https://mcp.inneranimalmedia.com/mcp`
++3. Point `agentsam_tools.handler_config.server_key` at proven tools
++4. Import `dist/mcp-bridge/manifest.json` after Remix build for drift checks
++5. Run MCP server ratchet tests against the same schema export names
+diff --git a/package.json b/package.json
+index 34c5bdd..5fc7659 100644
+--- a/package.json
++++ b/package.json
+@@ -5,7 +5,7 @@
+   "type": "module",
+   "scripts": {
+     "dev": "concurrently -k -n vite,worker -c blue,green \"vite --config app/vite.config.ts\" \"wrangler dev\"",
+-    "build": "NODE_OPTIONS=--max-old-space-size=4096 vite build --config app/vite.config.ts",
++    "build": "NODE_OPTIONS=--max-old-space-size=4096 vite build --config app/vite.config.ts && node scripts/export-mcp-bridge-manifest.mjs",
+     "typecheck": "tsc --noEmit",
+     "test:ui": "playwright test",
+     "test:browser": "node --test test/browser-live-view.test.mjs test/terminal-vpc.test.mjs",
+@@ -17,6 +17,8 @@
+     "deploy": "node bin/agentsam deploy fast",
+     "agentsam": "node bin/agentsam",
+     "verify:sdk-cli": "node bin/agentsam sdk status",
++    "verify:mcp-bridge": "node scripts/verify-mcp-schema-twins.mjs",
++    "export:mcp-bridge": "node scripts/export-mcp-bridge-manifest.mjs",
+     "guard:website-assets": "node scripts/guard-website-assets.mjs",
+     "guard:sdk-boundary": "node scripts/guard-agentsam-sdk-boundary.mjs",
+     "guard:boundaries": "depcruise app backend packages --config .dependency-cruiser.cjs",
+diff --git a/scripts/export-mcp-bridge-manifest.mjs b/scripts/export-mcp-bridge-manifest.mjs
+new file mode 100644
+index 0000000..14ba565
+--- /dev/null
++++ b/scripts/export-mcp-bridge-manifest.mjs
+@@ -0,0 +1,50 @@
++#!/usr/bin/env node
++/**
++ * Export build-ready MCP bridge artifact for inneranimalmedia-mcp-server consolidation.
++ * Writes dist/mcp-bridge/manifest.json + schema-twins/*.json snapshots.
++ */
++import { readFileSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
++import { join, dirname } from 'node:path';
++import { fileURLToPath, pathToFileURL } from 'node:url';
++import { createRequire } from 'node:module';
++
++const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
++const require = createRequire(import.meta.url);
++const OUT = join(ROOT, 'dist/mcp-bridge');
++
++const bridgeManifest = JSON.parse(
++  readFileSync(join(ROOT, 'config/mcp-server/bridge.manifest.json'), 'utf8'),
++);
++
++let sdkVersion = null;
++try {
++  const pkg = require('@inneranimalmedia/agentsam-sdk/package.json');
++  sdkVersion = pkg.version || null;
++} catch {
++  /* optional at export time */
++}
++
++const schemaSnapshots = {};
++for (const twin of bridgeManifest.schemaTwins || []) {
++  const abs = join(ROOT, twin.remixPath);
++  if (!existsSync(abs)) continue;
++  const mod = await import(pathToFileURL(abs).href);
++  schemaSnapshots[twin.mcpServerPath] = {
++    exportName: twin.exportName,
++    schema: twin.exportName ? mod[twin.exportName] : null,
++    remixPath: twin.remixPath,
++  };
++}
++
++mkdirSync(OUT, { recursive: true });
++
++const exportDoc = {
++  ...bridgeManifest,
++  generatedAt: new Date().toISOString(),
++  remixGitHead: process.env.GITHUB_SHA || process.env.CF_PAGES_COMMIT_SHA || null,
++  agentsamSdkVersion: sdkVersion,
++  schemaSnapshots,
++};
++
++writeFileSync(join(OUT, 'manifest.json'), `${JSON.stringify(exportDoc, null, 2)}\n`);
++console.log(`Wrote ${join(OUT, 'manifest.json')}`);
+diff --git a/scripts/push-integration-branch.sh b/scripts/push-integration-branch.sh
+new file mode 100644
+index 0000000..0bc666d
+--- /dev/null
++++ b/scripts/push-integration-branch.sh
+@@ -0,0 +1,27 @@
++#!/usr/bin/env bash
++# Apply AgentSamRemix integration commits to a local clone and push to origin.
++# Run from a machine with write access to SamPrimeaux/AgentSamRemix.
++set -euo pipefail
++
++PATCH_URL="${1:-https://raw.githubusercontent.com/SamPrimeaux/AgentSamWorkMode-Prototype/cursor/remix-integration-guide-8edb/patches/agentsamremix-full-integration.patch}"
++
++if [[ ! -d .git ]]; then
++  echo "Run inside an AgentSamRemix git clone."
++  exit 1
++fi
++
++echo "Fetching patch from prototype repo..."
++curl -fsSL "$PATCH_URL" -o /tmp/agentsamremix-integration.patch
++
++git checkout -B cursor/integrate-workmode-ui-8edb
++git am /tmp/agentsamremix-integration.patch
++
++npm ci
++npm run verify:mcp-bridge
++npm run verify:sdk-cli
++npm run test:bin-lib
++npm run build
++
++git push -u origin cursor/integrate-workmode-ui-8edb
++
++echo "Done. Open PR: https://github.com/SamPrimeaux/AgentSamRemix/compare/main...cursor/integrate-workmode-ui-8edb"
+diff --git a/scripts/verify-mcp-schema-twins.mjs b/scripts/verify-mcp-schema-twins.mjs
+new file mode 100644
+index 0000000..076daa6
+--- /dev/null
++++ b/scripts/verify-mcp-schema-twins.mjs
+@@ -0,0 +1,39 @@
++#!/usr/bin/env node
++/**
++ * Verify MCP schema twin modules exist and export expected symbols.
++ * Run in CI before deploy — keeps AgentSamRemix aligned with inneranimalmedia-mcp-server.
++ */
++import { readFileSync, existsSync } from 'node:fs';
++import { join, dirname } from 'node:path';
++import { fileURLToPath, pathToFileURL } from 'node:url';
++
++const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
++const manifestPath = join(ROOT, 'config/mcp-server/bridge.manifest.json');
++const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
++const twins = manifest.schemaTwins || [];
++
++const issues = [];
++
++for (const twin of twins) {
++  const abs = join(ROOT, twin.remixPath);
++  if (!existsSync(abs)) {
++    issues.push(`missing remix twin: ${twin.remixPath}`);
++    continue;
++  }
++  try {
++    const mod = await import(pathToFileURL(abs).href);
++    if (twin.exportName && mod[twin.exportName] == null) {
++      issues.push(`${twin.remixPath}: missing export ${twin.exportName}`);
++    }
++  } catch (e) {
++    issues.push(`${twin.remixPath}: import failed — ${e?.message || e}`);
++  }
++}
++
++if (issues.length) {
++  console.error('MCP schema twin verification failed:\n');
++  for (const issue of issues) console.error(`  • ${issue}`);
++  process.exit(1);
++}
++
++console.log(`MCP schema twins OK (${twins.length} modules)`);
+-- 
+2.43.0
+

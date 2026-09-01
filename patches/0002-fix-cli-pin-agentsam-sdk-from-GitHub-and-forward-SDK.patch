@@ -1,0 +1,295 @@
+From ec665625e527f8753bd3875be953b76c5c42fecc Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Tue, 1 Sep 2026 15:43:17 +0000
+Subject: [PATCH 2/3] fix(cli): pin agentsam-sdk from GitHub and forward SDK
+ verbs
+
+The npm alpha.12 tarball lagged git main (missing status/db/tui). Pin
+@inneranimalmedia/agentsam-sdk to github:SamPrimeaux/agentsam-sdk@607ce23
+and delegate any non-host verb to the installed SDK CLI automatically.
+---
+ bin/README.md          |  9 ++++---
+ bin/agentsam           | 23 +++++++++---------
+ bin/commands/index.mjs |  7 +++++-
+ package-lock.json      | 55 +++++++++++++++++++++++++++++-------------
+ package.json           |  4 ++-
+ test/bin-lib.test.mjs  | 11 +++++++++
+ 6 files changed, 75 insertions(+), 34 deletions(-)
+
+diff --git a/bin/README.md b/bin/README.md
+index effbf68..ce14cfd 100644
+--- a/bin/README.md
++++ b/bin/README.md
+@@ -8,17 +8,18 @@ Primary entrypoint:
+ 
+ ```text
+ bin/agentsam
+-├── context|init|start-local|tunnel|identity|shell  → installed SDK CLI
++├── context|init|status|db|tui|start-local|tunnel|identity|shell  → installed SDK CLI
+ ├── acp serve                                      → Remix host command
+-├── deploy full|fast|worker                        → Remix host command
++├── deploy full|fast|worker                        → Remix host command (overrides SDK deploy)
+ ├── eval retrieval                                 → Remix host command
+ ├── sdk status                                     → SDK integration status
+ └── website sync|watch|status|verify|rollback      → Remix host command
+ ```
+ 
+ Portable verbs and `--version` resolve the executable declared by the installed
+-`@inneranimalmedia/agentsam-sdk` package. Remix does not copy their command
+-implementations. Host-specific verbs remain here because they operate this repository.
++`@inneranimalmedia/agentsam-sdk` package. Any verb that is not a Remix host command
++(`acp`, `deploy`, `eval`, `sdk`, `website`) is forwarded to the SDK CLI automatically.
++Remix does not copy SDK command implementations.
+ 
+ Supporting executable implementations currently live in `bin/deploy` and
+ `bin/website-assets.mjs`; command dispatch modules live in `bin/commands/`.
+diff --git a/bin/agentsam b/bin/agentsam
+index 4dfc859..72ac3d9 100755
+--- a/bin/agentsam
++++ b/bin/agentsam
+@@ -14,7 +14,9 @@ import { COMMANDS, usage, resolveVerb } from './commands/index.mjs';
+ 
+ const require = createRequire(import.meta.url);
+ const SDK_PACKAGE = '@inneranimalmedia/agentsam-sdk';
+-const SDK_VERBS = new Set(['context', 'init', 'start-local', 'tunnel', 'identity', 'shell']);
++
++/** Remix-owned verbs — these override same-named SDK commands when both exist (e.g. deploy). */
++const HOST_VERBS = new Set(Object.keys(COMMANDS));
+ 
+ function resolveSdkCli() {
+   const packagePath = require.resolve(`${SDK_PACKAGE}/package.json`);
+@@ -59,18 +61,17 @@ function main(argv) {
+     return;
+   }
+ 
+-  const [verb, ...rest] = argv;
+-  if (SDK_VERBS.has(verb)) return runSdkCli(argv);
+-
++  const [verb] = argv;
+   const key = resolveVerb(verb);
+-  const cmd = COMMANDS[key];
+-  if (!cmd) {
+-    console.error(`unknown verb: ${verb}`);
+-    usage();
+-    process.exitCode = 2;
+-    return;
++
++  if (HOST_VERBS.has(key)) {
++    const cmd = COMMANDS[key];
++    return cmd(argv.slice(1));
+   }
+-  return cmd(rest);
++
++  // All other verbs execute the installed @inneranimalmedia/agentsam-sdk CLI
++  // (context, init, status, db, tui, start-local, tunnel, identity, shell, …).
++  return runSdkCli(argv);
+ }
+ 
+ Promise.resolve(main(process.argv.slice(2))).catch((error) => {
+diff --git a/bin/commands/index.mjs b/bin/commands/index.mjs
+index 08b799c..50665e1 100644
+--- a/bin/commands/index.mjs
++++ b/bin/commands/index.mjs
+@@ -21,13 +21,17 @@ export const VERB_ALIASES = {};
+ 
+ export const USAGE = `usage: bin/agentsam <verb> [subcommand] [options]
+ 
+-SDK verbs (delegated to @inneranimalmedia/agentsam-sdk):
++SDK verbs (delegated to @inneranimalmedia/agentsam-sdk when not a host verb):
+   context                         Git repository and bridge context
+   init                            local-first project scaffold
++  status [--json]                 live Git + DB + API + PTY status
++  db init|status                  project-local SQLite database
++  tui [rich]                      ANSI (or optional Rich) terminal dashboard
+   start-local                     local PTY server
+   tunnel                          expose the local PTY
+   identity    preview|init        portable identity setup
+   shell                           shell and slash-command information
++  deploy                          SDK deploy (use host deploy below for this repo)
+ 
+ AgentSamRemix host verbs:
+   acp         serve               local stdio ACP bridge to the Agent Sam API
+@@ -39,6 +43,7 @@ AgentSamRemix host verbs:
+ Examples:
+   bin/agentsam --version
+   bin/agentsam context --json
++  bin/agentsam status --json
+   bin/agentsam identity preview --open
+   bin/agentsam acp serve
+   bin/agentsam deploy full
+diff --git a/package-lock.json b/package-lock.json
+index 09e42b5..5593ac2 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -25,7 +25,7 @@
+         "@cloudflare/voice": "^0.4.0",
+         "@excalidraw/excalidraw": "^0.18.0",
+         "@google/genai": "^1.35.0",
+-        "@inneranimalmedia/agentsam-sdk": "2.0.0-alpha.identity.12",
++        "@inneranimalmedia/agentsam-sdk": "github:SamPrimeaux/agentsam-sdk#607ce232e935cc4d58908e49179191739c4946d1",
+         "@inneranimalmedia/client-3d-runtime": "file:packages/client-3d-runtime",
+         "@inneranimalmedia/client-cms-editor": "file:packages/client-cms-editor",
+         "@inneranimalmedia/client-core": "file:packages/client-core",
+@@ -40,7 +40,9 @@
+         "ai": "^7.0.84",
+         "aws4fetch": "^1.0.20",
+         "cannon-es": "0.20.0",
++        "canvas-confetti": "^1.9.4",
+         "chess.js": "^1.4.0",
++        "clsx": "^2.1.1",
+         "cookie-parser": "^1.4.7",
+         "express": "^5.2.1",
+         "framer-motion": "^12.38.0",
+@@ -66,6 +68,7 @@
+         "@remotion/player": "^4.0.506",
+         "@remotion/renderer": "^4.0.506",
+         "@tailwindcss/postcss": "^4.2.4",
++        "@types/canvas-confetti": "^1.9.0",
+         "@types/cookie-parser": "^1.4.10",
+         "@types/express": "^5.0.6",
+         "@types/node": "^22.14.0",
+@@ -3642,6 +3645,15 @@
+         "react": "^16.8 || ^17.0 || ^18.0"
+       }
+     },
++    "node_modules/@excalidraw/excalidraw/node_modules/clsx": {
++      "version": "1.1.1",
++      "resolved": "https://registry.npmjs.org/clsx/-/clsx-1.1.1.tgz",
++      "integrity": "sha512-6/bPho624p3S2pMyvP5kKBPXnI3ufHLObBFCfgx+LkeR5lg2XYy2hqZqUf45ypD8COn2bhgGJSUE+l5dhNBieA==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=6"
++      }
++    },
+     "node_modules/@excalidraw/excalidraw/node_modules/nanoid": {
+       "version": "3.3.3",
+       "resolved": "https://registry.npmjs.org/nanoid/-/nanoid-3.3.3.tgz",
+@@ -4332,8 +4344,8 @@
+     },
+     "node_modules/@inneranimalmedia/agentsam-sdk": {
+       "version": "2.0.0-alpha.identity.12",
+-      "resolved": "https://registry.npmjs.org/@inneranimalmedia/agentsam-sdk/-/agentsam-sdk-2.0.0-alpha.identity.12.tgz",
+-      "integrity": "sha512-/Wh/MZ6onSZSWc5YrOFCZ/Y71D+FE3/LGxB85D+Ob7BRx7zPc9Aicq4eOHDxcjJeg795y6tO3vMAKrZ2ZFi9UA==",
++      "resolved": "git+ssh://git@github.com/SamPrimeaux/agentsam-sdk.git#607ce232e935cc4d58908e49179191739c4946d1",
++      "integrity": "sha512-nxqnUaPYp/p7p2JeO1GXkKiux9NoZBUwfTWeQiDB0eHftlqr4oEvyk7cc6VwNRyCfRKwKoIHtznYqxo+G/ttIA==",
+       "license": "MIT",
+       "workspaces": [
+         "packages/agentsam-shell-kit",
+@@ -4348,10 +4360,11 @@
+       "bin": {
+         "agentsam": "src/cli.js",
+         "agentsam-auth-portal": "packages/identity/scripts/preview-auth-portal.mjs",
+-        "agentsam-scaffold": "bin/scaffold.mjs"
++        "agentsam-scaffold": "bin/scaffold.mjs",
++        "agentsam-sdk": "src/cli.js"
+       },
+       "engines": {
+-        "node": ">=20"
++        "node": ">=22.5.0"
+       }
+     },
+     "node_modules/@inneranimalmedia/client-3d-runtime": {
+@@ -7744,6 +7757,13 @@
+         "@types/node": "*"
+       }
+     },
++    "node_modules/@types/canvas-confetti": {
++      "version": "1.9.0",
++      "resolved": "https://registry.npmjs.org/@types/canvas-confetti/-/canvas-confetti-1.9.0.tgz",
++      "integrity": "sha512-aBGj/dULrimR1XDZLtG9JwxX1b4HPRF6CX9Yfwh3NvstZEm1ZL7RBnel4keCPSqs1ANRu1u2Aoz9R+VmtjYuTg==",
++      "dev": true,
++      "license": "MIT"
++    },
+     "node_modules/@types/connect": {
+       "version": "3.4.38",
+       "resolved": "https://registry.npmjs.org/@types/connect/-/connect-3.4.38.tgz",
+@@ -9744,6 +9764,16 @@
+       "integrity": "sha512-eZhWTZIkFOnMAJOgfXJa9+b3kVlvG+FX4mdkpePev/w/rP5V8NRquGyEozcjPfEoXUlb+p7d9SUcmDSn14prOA==",
+       "license": "MIT"
+     },
++    "node_modules/canvas-confetti": {
++      "version": "1.9.4",
++      "resolved": "https://registry.npmjs.org/canvas-confetti/-/canvas-confetti-1.9.4.tgz",
++      "integrity": "sha512-yxQbJkAVrFXWNbTUjPqjF7G+g6pDotOUHGbkZq2NELZUMDpiJ85rIEazVb8GTaAptNW2miJAXbs1BtioA251Pw==",
++      "license": "ISC",
++      "funding": {
++        "type": "donate",
++        "url": "https://www.paypal.me/kirilvatev"
++      }
++    },
+     "node_modules/canvas-roundrect-polyfill": {
+       "version": "0.0.1",
+       "resolved": "https://registry.npmjs.org/canvas-roundrect-polyfill/-/canvas-roundrect-polyfill-0.0.1.tgz",
+@@ -10003,9 +10033,9 @@
+       }
+     },
+     "node_modules/clsx": {
+-      "version": "1.1.1",
+-      "resolved": "https://registry.npmjs.org/clsx/-/clsx-1.1.1.tgz",
+-      "integrity": "sha512-6/bPho624p3S2pMyvP5kKBPXnI3ufHLObBFCfgx+LkeR5lg2XYy2hqZqUf45ypD8COn2bhgGJSUE+l5dhNBieA==",
++      "version": "2.1.1",
++      "resolved": "https://registry.npmjs.org/clsx/-/clsx-2.1.1.tgz",
++      "integrity": "sha512-eYm0QWBtUrBWZWG0d386OGAw16Z995PiOVo2B7bjWSbHedGl5e0ZWaq65kOGgUSNesEIDkB9ISbTg/JK9dhCZA==",
+       "license": "MIT",
+       "engines": {
+         "node": ">=6"
+@@ -17311,15 +17341,6 @@
+         "decimal.js-light": "^2.4.1"
+       }
+     },
+-    "node_modules/recharts/node_modules/clsx": {
+-      "version": "2.1.1",
+-      "resolved": "https://registry.npmjs.org/clsx/-/clsx-2.1.1.tgz",
+-      "integrity": "sha512-eYm0QWBtUrBWZWG0d386OGAw16Z995PiOVo2B7bjWSbHedGl5e0ZWaq65kOGgUSNesEIDkB9ISbTg/JK9dhCZA==",
+-      "license": "MIT",
+-      "engines": {
+-        "node": ">=6"
+-      }
+-    },
+     "node_modules/rechoir": {
+       "version": "0.8.0",
+       "resolved": "https://registry.npmjs.org/rechoir/-/rechoir-0.8.0.tgz",
+diff --git a/package.json b/package.json
+index 00f1643..34c5bdd 100644
+--- a/package.json
++++ b/package.json
+@@ -15,6 +15,8 @@
+     "test:terminal": "node --test test/terminal-vpc.test.mjs",
+     "eval:retrieval": "node scripts/eval-retrieval-v1.mjs",
+     "deploy": "node bin/agentsam deploy fast",
++    "agentsam": "node bin/agentsam",
++    "verify:sdk-cli": "node bin/agentsam sdk status",
+     "guard:website-assets": "node scripts/guard-website-assets.mjs",
+     "guard:sdk-boundary": "node scripts/guard-agentsam-sdk-boundary.mjs",
+     "guard:boundaries": "depcruise app backend packages --config .dependency-cruiser.cjs",
+@@ -38,7 +40,7 @@
+     "@cloudflare/voice": "^0.4.0",
+     "@excalidraw/excalidraw": "^0.18.0",
+     "@google/genai": "^1.35.0",
+-    "@inneranimalmedia/agentsam-sdk": "2.0.0-alpha.identity.12",
++    "@inneranimalmedia/agentsam-sdk": "github:SamPrimeaux/agentsam-sdk#607ce232e935cc4d58908e49179191739c4946d1",
+     "@inneranimalmedia/client-3d-runtime": "file:packages/client-3d-runtime",
+     "@inneranimalmedia/client-cms-editor": "file:packages/client-cms-editor",
+     "@inneranimalmedia/client-core": "file:packages/client-core",
+diff --git a/test/bin-lib.test.mjs b/test/bin-lib.test.mjs
+index b2b86d1..0952ef1 100644
+--- a/test/bin-lib.test.mjs
++++ b/test/bin-lib.test.mjs
+@@ -62,3 +62,14 @@ test('portable bin helpers are SDK-backed with no outstanding candidates', () =>
+   assert.equal(report.ok, true);
+   assert.deepEqual(report.candidates, []);
+ });
++
++test('host CLI forwards SDK-only verbs to the installed agentsam-sdk binary', async () => {
++  const { spawnSync } = await import('node:child_process');
++  const result = spawnSync(process.execPath, ['bin/agentsam', 'status', '--json'], {
++    cwd: ROOT,
++    encoding: 'utf8',
++  });
++  assert.equal(result.status, 0, result.stderr || result.stdout);
++  const payload = JSON.parse(result.stdout);
++  assert.equal(typeof payload.schemaVersion, 'string');
++});
+-- 
+2.43.0
+
