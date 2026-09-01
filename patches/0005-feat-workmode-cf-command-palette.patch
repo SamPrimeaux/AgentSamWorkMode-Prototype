@@ -1,0 +1,500 @@
+From 3725d0ec31ce3035206bedd9b4ae5b6a71e22d42 Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Tue, 1 Sep 2026 16:16:45 +0000
+Subject: [PATCH] feat(workmode): wire CF command palette into NavigationHeader
+
+Add WorkModeCommandPalette with Wrangler/gh/deploy catalogs, D1
+/api/commands merge, Cmd+K shortcut, and shell terminal dispatch via
+useWorkModeShellBridge. Cloud button + plus menu entry in header.
+---
+ app/workmode/WorkModePage.tsx                 |  29 ++
+ app/workmode/components/NavigationHeader.tsx  |  37 +-
+ .../components/WorkModeCommandPalette.tsx     | 332 ++++++++++++++++++
+ 3 files changed, 397 insertions(+), 1 deletion(-)
+ create mode 100644 app/workmode/components/WorkModeCommandPalette.tsx
+
+diff --git a/app/workmode/WorkModePage.tsx b/app/workmode/WorkModePage.tsx
+index 09d548f..0effe55 100644
+--- a/app/workmode/WorkModePage.tsx
++++ b/app/workmode/WorkModePage.tsx
+@@ -41,6 +41,11 @@ import { useWorkModeShellBridge } from './hooks/useWorkModeShellBridge';
+ import { useWorkModeGitBridge } from './hooks/useWorkModeGitBridge';
+ import { useWorkModeTelemetryBridge } from './hooks/useWorkModeTelemetryBridge';
+ import type { TelemetryData } from './lib/telemetry';
++import {
++  WorkModeCommandPalette,
++  useWorkModeCommandPaletteShortcut,
++} from './components/WorkModeCommandPalette';
++import { IAM_OPEN_COMMAND_PALETTE } from '../src/lib/openCommandPalette';
+ 
+ function WorkModeInner() {
+   const navigate = useNavigate();
+@@ -63,6 +68,7 @@ function WorkModeInner() {
+   });
+   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
+   const [isPresentationOpen, setIsPresentationOpen] = useState(false);
++  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+ 
+   const [selectedModel, setSelectedModel] = useState<ModelChoice>(config.defaultModel);
+   const [activeBranch, setActiveBranchState] = useState<string>(config.defaultBranch);
+@@ -124,6 +130,22 @@ function WorkModeInner() {
+     openShellTerminal();
+   }, [openShellTerminal]);
+ 
++  const handlePaletteCommand = useCallback(
++    (command: string) => {
++      setIsTerminalOpen(true);
++      runInShellTerminal(command);
++    },
++    [runInShellTerminal],
++  );
++
++  useWorkModeCommandPaletteShortcut(() => setCommandPaletteOpen(true));
++
++  useEffect(() => {
++    const onGlobalPalette = () => setCommandPaletteOpen(true);
++    window.addEventListener(IAM_OPEN_COMMAND_PALETTE, onGlobalPalette);
++    return () => window.removeEventListener(IAM_OPEN_COMMAND_PALETTE, onGlobalPalette);
++  }, []);
++
+   const handleSendMessage = async (text: string, model: ModelChoice) => {
+     const userMsg: ChatMessageItem = {
+       id: 'msg-' + Date.now(),
+@@ -262,6 +284,7 @@ function WorkModeInner() {
+           onWorkSubTabChange={setWorkSubTab}
+           onQuickAction={handleQuickAction}
+           onOpenTerminal={handleOpenTerminal}
++          onOpenCommandPalette={() => setCommandPaletteOpen(true)}
+           isDarkMode={isDarkMode}
+           onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
+           layoutMode={layoutMode}
+@@ -391,6 +414,12 @@ function WorkModeInner() {
+         onClose={() => setIsPresentationOpen(false)}
+         deck={deck}
+       />
++
++      <WorkModeCommandPalette
++        open={commandPaletteOpen}
++        onOpenChange={setCommandPaletteOpen}
++        onRunCommand={handlePaletteCommand}
++      />
+     </div>
+   );
+ }
+diff --git a/app/workmode/components/NavigationHeader.tsx b/app/workmode/components/NavigationHeader.tsx
+index 15ca9b4..aca480f 100644
+--- a/app/workmode/components/NavigationHeader.tsx
++++ b/app/workmode/components/NavigationHeader.tsx
+@@ -14,7 +14,9 @@ import {
+   FolderGit2,
+   Home,
+   Layers,
+-  MessageSquare
++  MessageSquare,
++  Cloud,
++  Search,
+ } from 'lucide-react';
+ import { AppMode, FlexLayoutMode, WorkSubTab } from '../types';
+ import { useWorkModeConfig } from '../context/WorkModeConfigContext';
+@@ -30,6 +32,7 @@ interface NavigationHeaderProps {
+   onOpenMenu?: () => void;
+   onQuickAction: () => void;
+   onOpenTerminal?: () => void;
++  onOpenCommandPalette?: () => void;
+   isDarkMode: boolean;
+   onToggleDarkMode: () => void;
+   layoutMode: FlexLayoutMode;
+@@ -46,6 +49,7 @@ export const NavigationHeader: React.FC<NavigationHeaderProps> = ({
+   onOpenMenu,
+   onQuickAction,
+   onOpenTerminal,
++  onOpenCommandPalette,
+   isDarkMode,
+   onToggleDarkMode,
+   layoutMode,
+@@ -236,6 +240,19 @@ export const NavigationHeader: React.FC<NavigationHeaderProps> = ({
+           </button>
+         </div>
+ 
++        {/* Cloudflare unified command palette */}
++        <button
++          id="btn-cf-command-palette"
++          type="button"
++          onClick={() => onOpenCommandPalette?.()}
++          title="Cloudflare & GitHub CLI commands (⌘K)"
++          aria-label="Open Cloudflare command palette"
++          className="hidden sm:flex min-w-[44px] min-h-[44px] h-11 px-3 rounded-2xl items-center justify-center gap-1.5 bg-orange-500/10 text-orange-600 dark:text-orange-400 hover:bg-orange-500/15 border border-orange-500/20 active:scale-95 transition-all shadow-2xs shrink-0 cursor-pointer touch-manipulation"
++        >
++          <Cloud size={16} />
++          <Search size={14} className="opacity-70" />
++        </button>
++
+         {/* Dark/Light Mode Toggle */}
+         <button
+           id="btn-toggle-theme"
+@@ -271,6 +288,24 @@ export const NavigationHeader: React.FC<NavigationHeaderProps> = ({
+ 
+               <div className="space-y-1">
+                 <button
++                  type="button"
++                  onClick={() => {
++                    setIsPlusMenuOpen(false);
++                    onOpenCommandPalette?.();
++                  }}
++                  className="w-full text-left px-3 py-2 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 text-xs font-medium flex items-center gap-2.5 transition-colors"
++                >
++                  <div className="w-6 h-6 rounded-lg bg-orange-500/10 text-orange-500 flex items-center justify-center shrink-0">
++                    <Cloud size={13} />
++                  </div>
++                  <div>
++                    <div className="font-semibold text-zinc-900 dark:text-zinc-100">Cloudflare Command Palette</div>
++                    <div className="text-[10px] text-zinc-400">Wrangler, D1, R2, gh — ⌘K</div>
++                  </div>
++                </button>
++
++                <button
++                  type="button"
+                   onClick={() => {
+                     setIsPlusMenuOpen(false);
+                     if (onOpenTerminal) onOpenTerminal();
+diff --git a/app/workmode/components/WorkModeCommandPalette.tsx b/app/workmode/components/WorkModeCommandPalette.tsx
+new file mode 100644
+index 0000000..e6c0114
+--- /dev/null
++++ b/app/workmode/components/WorkModeCommandPalette.tsx
+@@ -0,0 +1,332 @@
++/**
++ * Work Mode CF + GitHub CLI command palette (Wrangler/gh catalogs + optional D1 /api/commands).
++ */
++import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
++import { createPortal } from 'react-dom';
++import { Cloud, Search, X, Copy, Check } from 'lucide-react';
++import {
++  WRANGLER_CATEGORY_LABELS,
++  filterWranglerCatalog,
++  groupWranglerCatalog,
++  normalizeCommandRow,
++  type WranglerCatalogEntry,
++} from '../../lib/wranglerCommandCatalog';
++import {
++  GH_CATEGORY_LABELS,
++  filterGhCatalog,
++  groupGhCatalog,
++  normalizeGhCommandRow,
++  type GhCatalogEntry,
++} from '../../lib/ghCommandCatalog';
++import { filterDeployPaletteRows, type DeployPaletteRow } from '../../src/lib/deployPaletteItems';
++import { cn } from '../../lib/utils';
++
++export type WorkModeCommandPaletteItem = {
++  id: string;
++  title: string;
++  subtitle: string;
++  commandText: string;
++  sectionLabel: string;
++  risk?: 'low' | 'medium' | 'high';
++};
++
++type WorkModeCommandPaletteProps = {
++  open: boolean;
++  onOpenChange: (open: boolean) => void;
++  onRunCommand?: (command: string) => void;
++};
++
++function wrToItem(c: WranglerCatalogEntry): WorkModeCommandPaletteItem {
++  return {
++    id: c.id,
++    title: c.display_name,
++    subtitle: c.mapped_command,
++    commandText: c.mapped_command,
++    sectionLabel: WRANGLER_CATEGORY_LABELS[c.category],
++    risk: c.risk_level,
++  };
++}
++
++function ghToItem(c: GhCatalogEntry): WorkModeCommandPaletteItem {
++  return {
++    id: c.id,
++    title: c.display_name,
++    subtitle: c.mapped_command,
++    commandText: c.mapped_command,
++    sectionLabel: `GitHub CLI · ${GH_CATEGORY_LABELS[c.category]}`,
++    risk: c.risk_level,
++  };
++}
++
++function deployToItem(r: DeployPaletteRow): WorkModeCommandPaletteItem {
++  return {
++    id: r.id,
++    title: r.title,
++    subtitle: r.subtitle,
++    commandText: r.commandText ?? r.subtitle,
++    sectionLabel: 'Deploy',
++  };
++}
++
++function mergeCatalogRows(apiRows: Record<string, unknown>[], searchTerm: string) {
++  const wrByCmd = new Map<string, WranglerCatalogEntry>();
++  const ghByCmd = new Map<string, GhCatalogEntry>();
++
++  for (const raw of apiRows) {
++    const gh = normalizeGhCommandRow(raw);
++    if (gh) {
++      ghByCmd.set(gh.mapped_command.toLowerCase(), gh);
++      continue;
++    }
++    const wr = normalizeCommandRow(raw);
++    if (wr) wrByCmd.set(wr.mapped_command.toLowerCase(), wr);
++  }
++
++  for (const c of filterWranglerCatalog(searchTerm, 80)) {
++    if (!wrByCmd.has(c.mapped_command.toLowerCase())) wrByCmd.set(c.mapped_command.toLowerCase(), c);
++  }
++  for (const c of filterGhCatalog(searchTerm, 80)) {
++    if (!ghByCmd.has(c.mapped_command.toLowerCase())) ghByCmd.set(c.mapped_command.toLowerCase(), c);
++  }
++
++  return {
++    wrangler: [...wrByCmd.values()],
++    gh: [...ghByCmd.values()],
++  };
++}
++
++function buildSections(
++  term: string,
++  merged?: { wrangler: WranglerCatalogEntry[]; gh: GhCatalogEntry[] },
++): { label: string; items: WorkModeCommandPaletteItem[] }[] {
++  const deploy = filterDeployPaletteRows(term).map(deployToItem);
++  const ghRows = merged?.gh ?? filterGhCatalog(term, 80);
++  const wrRows = merged?.wrangler ?? filterWranglerCatalog(term, 80);
++
++  const gh = groupGhCatalog(ghRows).map((g) => ({
++    label: `GitHub CLI · ${g.label}`,
++    items: g.rows.map(ghToItem),
++  }));
++  const wr = groupWranglerCatalog(wrRows).map((g) => ({
++    label: g.label,
++    items: g.rows.map(wrToItem),
++  }));
++
++  const sections: { label: string; items: WorkModeCommandPaletteItem[] }[] = [];
++  if (deploy.length) sections.push({ label: 'Deploy', items: deploy });
++  sections.push(...gh, ...wr);
++  return sections.filter((s) => s.items.length > 0);
++}
++
++export const WorkModeCommandPalette: React.FC<WorkModeCommandPaletteProps> = ({
++  open,
++  onOpenChange,
++  onRunCommand,
++}) => {
++  const [term, setTerm] = useState('');
++  const [activeIndex, setActiveIndex] = useState(0);
++  const [toast, setToast] = useState('');
++  const [apiRows, setApiRows] = useState<Record<string, unknown>[]>([]);
++  const inputRef = useRef<HTMLInputElement>(null);
++  const listRef = useRef<HTMLDivElement>(null);
++
++  useEffect(() => {
++    if (!open) return;
++    setTerm('');
++    setActiveIndex(0);
++    setToast('');
++    setApiRows([]);
++    const t = window.setTimeout(() => inputRef.current?.focus(), 50);
++
++    void fetch('/api/commands?limit=80', { credentials: 'same-origin' })
++      .then((r) => (r.ok ? r.json() : { commands: [] }))
++      .then((body: { commands?: Record<string, unknown>[] }) => {
++        setApiRows(Array.isArray(body?.commands) ? body.commands : []);
++      })
++      .catch(() => setApiRows([]));
++
++    return () => window.clearTimeout(t);
++  }, [open]);
++
++  const sections = useMemo(() => {
++    const merged = mergeCatalogRows(apiRows, term);
++    return buildSections(term, merged);
++  }, [term, apiRows]);
++
++  const flatItems = useMemo(() => sections.flatMap((s) => s.items), [sections]);
++
++  useEffect(() => {
++    setActiveIndex(0);
++  }, [term]);
++
++  const close = useCallback(() => onOpenChange(false), [onOpenChange]);
++
++  const applyItem = useCallback(
++    (item: WorkModeCommandPaletteItem) => {
++      void navigator.clipboard?.writeText(item.commandText).catch(() => {});
++      onRunCommand?.(item.commandText);
++      setToast(`Copied: ${item.commandText}`);
++      window.setTimeout(() => close(), 120);
++    },
++    [close, onRunCommand],
++  );
++
++  useEffect(() => {
++    if (!open) return;
++    const onKey = (e: KeyboardEvent) => {
++      if (e.key === 'Escape') {
++        e.preventDefault();
++        close();
++        return;
++      }
++      if (e.key === 'ArrowDown') {
++        e.preventDefault();
++        setActiveIndex((i) => Math.min(i + 1, Math.max(flatItems.length - 1, 0)));
++        return;
++      }
++      if (e.key === 'ArrowUp') {
++        e.preventDefault();
++        setActiveIndex((i) => Math.max(i - 1, 0));
++        return;
++      }
++      if (e.key === 'Enter' && flatItems[activeIndex]) {
++        e.preventDefault();
++        applyItem(flatItems[activeIndex]);
++      }
++    };
++    window.addEventListener('keydown', onKey);
++    return () => window.removeEventListener('keydown', onKey);
++  }, [open, flatItems, activeIndex, applyItem, close]);
++
++  useEffect(() => {
++    const el = listRef.current?.querySelector('[data-active="true"]');
++    el?.scrollIntoView({ block: 'nearest' });
++  }, [activeIndex]);
++
++  if (!open) return null;
++
++  let runningIndex = 0;
++
++  return createPortal(
++    <div
++      className="fixed inset-0 z-[200] flex items-start justify-center pt-[12vh] px-4 bg-black/40 backdrop-blur-sm"
++      onMouseDown={(e) => {
++        if (e.target === e.currentTarget) close();
++      }}
++    >
++      <div
++        role="dialog"
++        aria-label="Cloudflare command palette"
++        className="w-full max-w-[640px] rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/95 dark:bg-zinc-950/95 shadow-2xl overflow-hidden flex flex-col max-h-[min(70vh,560px)]"
++      >
++        <div className="flex items-center gap-2 px-4 py-3 border-b border-zinc-200/80 dark:border-zinc-800/80">
++          <Cloud size={18} className="text-orange-500 shrink-0" />
++          <Search size={16} className="text-zinc-400 shrink-0" />
++          <input
++            ref={inputRef}
++            value={term}
++            onChange={(e) => setTerm(e.target.value)}
++            placeholder="Wrangler, D1, R2, gh pr, deploy…  (⌘K)"
++            className="flex-1 bg-transparent text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 outline-none font-medium"
++          />
++          <button
++            type="button"
++            onClick={close}
++            className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-900"
++            aria-label="Close command palette"
++          >
++            <X size={16} />
++          </button>
++        </div>
++
++        <div ref={listRef} className="flex-1 overflow-y-auto p-2 min-h-0">
++          {sections.length === 0 ? (
++            <div className="px-4 py-8 text-center text-sm text-zinc-400">No commands match your search.</div>
++          ) : (
++            sections.map((section) => (
++              <div key={section.label} className="mb-2">
++                <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-orange-500/90">
++                  {section.label}
++                </div>
++                <div className="space-y-0.5">
++                  {section.items.map((item) => {
++                    const idx = runningIndex++;
++                    const selected = idx === activeIndex;
++                    return (
++                      <button
++                        key={item.id}
++                        type="button"
++                        data-active={selected ? 'true' : undefined}
++                        onClick={() => applyItem(item)}
++                        className={cn(
++                          'w-full text-left px-3 py-2.5 rounded-xl flex flex-col gap-0.5 transition-colors',
++                          selected
++                            ? 'bg-orange-500/10 border border-orange-500/20'
++                            : 'hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-transparent',
++                        )}
++                      >
++                        <div className="flex items-center justify-between gap-2">
++                          <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">
++                            {item.title}
++                          </span>
++                          {item.risk === 'high' ? (
++                            <span className="text-[9px] uppercase tracking-wide text-red-500 shrink-0">high risk</span>
++                          ) : null}
++                        </div>
++                        <span className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400 truncate">
++                          {item.subtitle}
++                        </span>
++                      </button>
++                    );
++                  })}
++                </div>
++              </div>
++            ))
++          )}
++        </div>
++
++        <div className="px-4 py-2.5 border-t border-zinc-200/80 dark:border-zinc-800/80 flex items-center justify-between text-[10px] text-zinc-400">
++          <span className="flex items-center gap-3">
++            <span>
++              <kbd className="px-1 py-0.5 rounded border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900">
++                ↑↓
++              </kbd>{' '}
++              navigate
++            </span>
++            <span>
++              <kbd className="px-1 py-0.5 rounded border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900">
++                ↵
++              </kbd>{' '}
++              copy + shell
++            </span>
++          </span>
++          {toast ? (
++            <span className="flex items-center gap-1 text-emerald-500">
++              <Check size={12} /> {toast}
++            </span>
++          ) : (
++            <span className="flex items-center gap-1">
++              <Copy size={11} /> copies shell line
++            </span>
++          )}
++        </div>
++      </div>
++    </div>,
++    document.body,
++  );
++};
++
++/** Global ⌘K / Ctrl+K in Work Mode */
++export function useWorkModeCommandPaletteShortcut(onOpen: () => void, enabled = true) {
++  useEffect(() => {
++    if (!enabled) return;
++    const handler = (e: KeyboardEvent) => {
++      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
++        e.preventDefault();
++        onOpen();
++      }
++    };
++    window.addEventListener('keydown', handler);
++    return () => window.removeEventListener('keydown', handler);
++  }, [enabled, onOpen]);
++}
+-- 
+2.43.0
+
