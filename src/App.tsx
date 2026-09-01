@@ -33,6 +33,10 @@ import { ChatView } from './components/ChatView';
 import { WorkModeView } from './components/WorkModeView';
 import { TerminalDrawer } from './components/TerminalDrawer';
 import { PresentationModal } from './components/PresentationModal';
+import {
+  CfUnifiedCommandPalette,
+  useCommandPaletteShortcut,
+} from './components/shell/CfUnifiedCommandPalette';
 import { cn } from './lib/utils';
 import { Smartphone, Columns } from 'lucide-react';
 
@@ -53,6 +57,8 @@ function AppInner() {
   });
   const [isTerminalOpen, setIsTerminalOpen] = useState<boolean>(false);
   const [isPresentationOpen, setIsPresentationOpen] = useState<boolean>(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [terminalSeedCommand, setTerminalSeedCommand] = useState<string | null>(null);
 
   // Model & Context (Initialized dynamically from environment-aware config)
   const [selectedModel, setSelectedModel] = useState<ModelChoice>(config.defaultModel);
@@ -186,6 +192,13 @@ function AppInner() {
     }
   };
 
+  const handleRunPaletteCommand = (command: string) => {
+    setTerminalSeedCommand(command);
+    setIsTerminalOpen(true);
+  };
+
+  useCommandPaletteShortcut(() => setCommandPaletteOpen(true));
+
   const handleRunTestAgain = () => {
     handleSendMessage('npm test -- auth', selectedModel);
   };
@@ -234,6 +247,7 @@ function AppInner() {
           onWorkSubTabChange={setWorkSubTab}
           onQuickAction={() => {}}
           onOpenTerminal={() => setIsTerminalOpen(true)}
+          onOpenCommandPalette={() => setCommandPaletteOpen(true)}
           isDarkMode={isDarkMode}
           onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
           layoutMode={layoutMode}
@@ -364,6 +378,13 @@ function AppInner() {
         activeBranch={activeBranch}
         activePath={activePath}
         customLogs={terminalLogs}
+        seedCommand={terminalSeedCommand}
+      />
+
+      <CfUnifiedCommandPalette
+        open={commandPaletteOpen}
+        onOpenChange={setCommandPaletteOpen}
+        onRunCommand={handleRunPaletteCommand}
       />
 
       {/* Client Pitch Presentation Fullscreen Modal */}

@@ -14,7 +14,9 @@ import {
   FolderGit2,
   Home,
   Layers,
-  MessageSquare
+  MessageSquare,
+  Cloud,
+  Search,
 } from 'lucide-react';
 import { AppMode, FlexLayoutMode, WorkSubTab } from '../types';
 import { useConfiguration } from '../contexts/ConfigurationContext';
@@ -30,6 +32,7 @@ interface NavigationHeaderProps {
   onOpenMenu?: () => void;
   onQuickAction: () => void;
   onOpenTerminal?: () => void;
+  onOpenCommandPalette?: () => void;
   isDarkMode: boolean;
   onToggleDarkMode: () => void;
   layoutMode: FlexLayoutMode;
@@ -46,6 +49,7 @@ export const NavigationHeader: React.FC<NavigationHeaderProps> = ({
   onOpenMenu,
   onQuickAction,
   onOpenTerminal,
+  onOpenCommandPalette,
   isDarkMode,
   onToggleDarkMode,
   layoutMode,
@@ -236,6 +240,18 @@ export const NavigationHeader: React.FC<NavigationHeaderProps> = ({
           </button>
         </div>
 
+        {/* Cloudflare unified command palette */}
+        <button
+          id="btn-cf-command-palette"
+          onClick={() => onOpenCommandPalette?.()}
+          title="Cloudflare & GitHub CLI commands (⌘K)"
+          aria-label="Open Cloudflare command palette"
+          className="hidden sm:flex min-w-[44px] min-h-[44px] h-11 px-3 rounded-2xl items-center justify-center gap-1.5 bg-orange-500/10 text-orange-600 dark:text-orange-400 hover:bg-orange-500/15 border border-orange-500/20 active:scale-95 transition-all shadow-2xs shrink-0 cursor-pointer touch-manipulation"
+        >
+          <Cloud size={16} />
+          <Search size={14} className="opacity-70" />
+        </button>
+
         {/* Dark/Light Mode Toggle */}
         <button
           id="btn-toggle-theme"
@@ -270,6 +286,22 @@ export const NavigationHeader: React.FC<NavigationHeaderProps> = ({
               </div>
 
               <div className="space-y-1">
+                <button
+                  onClick={() => {
+                    setIsPlusMenuOpen(false);
+                    onOpenCommandPalette?.();
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 text-xs font-medium flex items-center gap-2.5 transition-colors"
+                >
+                  <div className="w-6 h-6 rounded-lg bg-orange-500/10 text-orange-500 flex items-center justify-center shrink-0">
+                    <Cloud size={13} />
+                  </div>
+                  <div>
+                    <div className="font-semibold text-zinc-900 dark:text-zinc-100">Cloudflare Command Palette</div>
+                    <div className="text-[10px] text-zinc-400">Wrangler, D1, R2, gh — ⌘K</div>
+                  </div>
+                </button>
+
                 <button
                   onClick={() => {
                     setIsPlusMenuOpen(false);

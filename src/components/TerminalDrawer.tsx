@@ -48,6 +48,7 @@ interface TerminalDrawerProps {
   activePath?: string;
   customLogs?: string[];
   initialSnapPosition?: TerminalSnapPosition;
+  seedCommand?: string | null;
 }
 
 export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
@@ -59,6 +60,7 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
   activePath = 'backend/agentsam',
   customLogs,
   initialSnapPosition = 'split',
+  seedCommand = null,
 }) => {
   const [activeTab, setActiveTab] = useState<'output' | 'files' | 'environment' | 'traces'>('output');
   const [snapPosition, setSnapPosition] = useState<TerminalSnapPosition>(initialSnapPosition);
@@ -102,6 +104,13 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
       setLogs(customLogs);
     }
   }, [customLogs]);
+
+  useEffect(() => {
+    if (!seedCommand || !isOpen) return;
+    setCommandInput(seedCommand);
+    setLogs((prev) => [...prev, `# Command palette → ${seedCommand}`, `${activePath} % ${seedCommand}`]);
+    inputRef.current?.focus();
+  }, [seedCommand, isOpen, activePath]);
 
   useEffect(() => {
     if (scrollRef.current && isOpen) {
