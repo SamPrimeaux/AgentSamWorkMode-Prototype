@@ -231,7 +231,7 @@ export function useTerminalBridge(options?: TerminalBridgeOptions) {
         }),
       });
 
-      if (!res.ok) {
+      if ('error' in res) {
         appendLine(`[exec] ${res.error.error} (${res.error.status})`);
         if (res.error.status === 401) {
           setState((s) => ({ ...s, authRequired: true }));
