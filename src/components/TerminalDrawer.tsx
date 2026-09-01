@@ -38,6 +38,10 @@ import {
 import { cn } from '../lib/utils';
 import { MobileTerminalAccessories } from './terminal/MobileTerminalAccessories';
 import { TerminalLaneSelector } from './terminal/TerminalLaneSelector';
+import { XtermPane } from './terminal/XtermPane';
+import { WorkbenchEditor } from './workbench/WorkbenchEditor';
+import { executionLaneToTarget } from '../lib/terminal/terminalLane';
+import type { TerminalLaneTarget } from '../lib/terminal/pairingTypes';
 
 interface TerminalDrawerProps {
   isOpen: boolean;
@@ -55,6 +59,8 @@ interface TerminalDrawerProps {
   onChangeLane?: (lane: ExecutionLane) => void;
   localConnectionActive?: boolean;
   onConnectMachine?: () => void;
+  workspaceId?: string | null;
+  terminalTargetType?: TerminalLaneTarget;
 }
 
 function buildTerminalBanner(activePath: string, activeBranch: string, opts?: { connected?: boolean; authRequired?: boolean }): string[] {
@@ -86,6 +92,8 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
   onChangeLane,
   localConnectionActive,
   onConnectMachine,
+  workspaceId,
+  terminalTargetType = 'user_hosted_tunnel',
 }) => {
   const [activeTab, setActiveTab] = useState<'output' | 'files' | 'environment' | 'traces'>('output');
   const [snapPosition, setSnapPosition] = useState<TerminalSnapPosition>(initialSnapPosition);
@@ -470,7 +478,7 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
                 )}
               >
                 <TerminalIcon size={13} />
-                <span>Shell Output</span>
+                <span>Shell (xterm)</span>
               </button>
               <button
                 onClick={() => setActiveTab('files')}
@@ -482,8 +490,8 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
                 )}
               >
                 <FileCode size={13} />
-                <span>Files</span>
-                <span className="text-[10px] bg-zinc-800 text-zinc-300 px-1.5 py-0.2 rounded-full">3</span>
+                <span>Editor (Monaco)</span>
+                <span className="text-[10px] bg-zinc-800 text-zinc-300 px-1.5 py-0.2 rounded-full">bridge</span>
               </button>
               <button
                 onClick={() => setActiveTab('environment')}
@@ -514,83 +522,21 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
 
           {/* Body Content (Rendered when not in Peek mode) */}
           {snapPosition !== 'peek' && (
-            <div className="flex-1 min-h-0 bg-black/90 p-3 sm:p-4 font-mono text-xs overflow-hidden flex flex-col">
+            <div className="flex-1 min-h-0 bg-black/90 overflow-hidden flex flex-col">
               {activeTab === 'output' && (
-                <>
-                  <div 
-                    ref={scrollRef}
-                    className="flex-1 overflow-y-auto space-y-1 select-text scrollbar-thin scrollbar-thumb-zinc-800"
-                  >
-                    {logs.map((log, idx) => (
-                      <div 
-                        key={idx} 
-                        className={cn(
-                          "leading-relaxed whitespace-pre-wrap font-mono",
-                          log.startsWith('✔') && "text-emerald-400",
-                          log.startsWith('✨') && "text-emerald-300 font-bold",
-                          log.startsWith('>') && "text-blue-400 font-semibold",
-                          log.includes('%') && "text-zinc-300 font-semibold",
-                          log.startsWith('#') && "text-zinc-500 italic",
-                          log.startsWith('[') && "text-purple-400 italic"
-                        )}
-                      >
-                        {log}
-                      </div>
-                    ))}
-                    {isRunning && (
-                      <div className="flex items-center gap-2 text-blue-400 pt-1">
-                        <span className="w-2 h-2 rounded-full bg-blue-500 animate-ping" />
-                        <span>Executing process on {activeLane}...</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Command prompt input */}
-                  <form onSubmit={handleRunCommand} className="mt-2 pt-2 border-t border-zinc-800 flex items-center gap-2 shrink-0">
-                    <span className="text-emerald-400 font-bold shrink-0">{`dev@macbook $`}</span>
-                    <input
-                      ref={inputRef}
-                      type="text"
-                      value={commandInput}
-                      onChange={(e) => setCommandInput(e.target.value)}
-                      placeholder="Enter shell command (e.g. npm test, git status)..."
-                      className="flex-1 bg-transparent text-zinc-100 placeholder-zinc-600 focus:outline-hidden font-mono text-xs"
-                    />
-                    <button
-                      type="submit"
-                      disabled={!commandInput.trim()}
-                      className="p-1 rounded-md text-zinc-400 hover:text-white disabled:opacity-30"
-                    >
-                      <CornerDownLeft size={14} />
-                    </button>
-                  </form>
-                </>
+                <XtermPane
+                  workspaceId={workspaceId}
+                  targetType={terminalTargetType || executionLaneToTarget(activeLane)}
+                  visible={isOpen}
+                  connectEnabled={isOpen}
+                  className="h-full"
+                  preferBridge={!terminalConnected}
+                />
               )}
 
               {activeTab === 'files' && (
-                <div className="flex-1 overflow-y-auto space-y-2 text-xs font-mono">
-                  <div className="text-zinc-400 mb-2">Modified Workspace Files:</div>
-                  <div className="p-2.5 rounded-xl bg-zinc-900/80 border border-zinc-800 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <FileCode size={14} className="text-blue-400" />
-                      <span>src/components/browser/BrowserSurface.tsx</span>
-                    </div>
-                    <span className="text-emerald-400 text-[11px]">+64 / -0</span>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-zinc-900/80 border border-zinc-800 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <FileCode size={14} className="text-blue-400" />
-                      <span>src/components/TerminalDrawer.tsx</span>
-                    </div>
-                    <span className="text-emerald-400 text-[11px]">+48 / -19</span>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-zinc-900/80 border border-zinc-800 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <FileCode size={14} className="text-amber-400" />
-                      <span>ecosystem.config.cjs</span>
-                    </div>
-                    <span className="text-amber-400 text-[11px]">Clean PM2</span>
-                  </div>
+                <div className="flex-1 min-h-0 p-2">
+                  <WorkbenchEditor className="h-full border-zinc-800" />
                 </div>
               )}
 

@@ -1,4 +1,3 @@
-import http from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { claimPairingCode, completePairing, registerSession } from './api.mjs';
 import { defaultDeviceName, defaultPlatform, loadConfig, saveConfig } from './config.mjs';
@@ -76,23 +75,22 @@ async function cmdRun(flags) {
   const userId = cfg.IAM_PTY_USER_ID;
   const workspaceId = cfg.IAM_PTY_WORKSPACE_ID;
   const port = Number(flags.port || cfg.PTY_PORT || 3099);
+  const platform = flags.platform || cfg.PLATFORM || defaultPlatform();
+  const root = flags.root || process.cwd();
 
   if (!ptyToken || !workerUrl || !pairId) {
     throw new Error('Not paired yet — run: agentsam-bridge pair <CODE>');
   }
 
+  const { startBridgeServer } = await import('./bridgeServer.mjs');
+  const bridge = await startBridgeServer({ port, root, platform });
+  console.log(`Bridge listening on ${bridge.url}`);
+  console.log(`  PTY WebSocket: ${bridge.wsUrl}`);
+  console.log(`  Filesystem root: ${bridge.root}`);
+
   const sessionId = `sess_${randomBytes(8).toString('hex')}`;
-  const localWs = `ws://127.0.0.1:${port}/terminal`;
+  const tunnelUrl = bridge.wsUrl;
 
-  const server = http.createServer((_req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('agentsam-bridge PTY stub — connect via Work Mode user_hosted_tunnel\n');
-  });
-
-  await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve));
-  console.log(`Bridge listening on http://127.0.0.1:${port}`);
-
-  const tunnelUrl = localWs;
   await registerSession({
     workerUrl,
     ptyToken,
@@ -100,7 +98,7 @@ async function cmdRun(flags) {
     tunnelUrl,
     userId,
     workspaceId,
-    shell: cfg.PLATFORM === 'windows' ? 'powershell' : 'bash',
+    shell: platform === 'windows' ? 'powershell' : 'bash',
   }).catch((e) => {
     console.warn(`session/register: ${e.message} (dev pairing may still complete)`);
   });
@@ -114,11 +112,11 @@ async function cmdRun(flags) {
     sessionId,
   });
 
-  console.log('✓ Bridge registered — return to Work Mode (lane: user_hosted_tunnel)');
+  console.log('✓ Bridge registered — Work Mode can use user_hosted_tunnel + file I/O');
   console.log('  Press Ctrl+C to stop');
 
   process.on('SIGINT', () => {
-    server.close();
+    bridge.server.close();
     process.exit(0);
   });
 }

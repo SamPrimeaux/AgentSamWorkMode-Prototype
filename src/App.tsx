@@ -430,6 +430,8 @@ function AppInner() {
         terminalConnected={terminal.connected}
         authRequired={terminal.authRequired || git.authRequired}
         onExecCommand={(cmd) => void terminal.execCommand(cmd)}
+        workspaceId={platform.workspaceId}
+        terminalTargetType={terminal.targetType}
         activeLane={targetToExecutionLane(terminal.targetType)}
         onChangeLane={handleTerminalLaneChange}
         localConnectionActive={terminal.localConnectionActive}

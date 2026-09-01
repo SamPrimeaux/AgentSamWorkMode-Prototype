@@ -5,6 +5,7 @@ import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import { logTelemetry, calculateCost } from "./src/lib/telemetry";
 import { createTerminalPairingRouter } from "./src/server/terminalPairing";
+import { mountBridgeProxy, startHttpServer } from "./src/server/bridgeProxy";
 
 dotenv.config();
 
@@ -81,6 +82,8 @@ async function startServer() {
   app.use("/api/auth", proxyToIam);
   app.use("/api/storage", proxyToIam);
 
+  mountBridgeProxy(app);
+
   let aiClient: GoogleGenAI | null = null;
   function getAiClient(): GoogleGenAI | null {
     const key = process.env.GEMINI_API_KEY;
@@ -146,10 +149,8 @@ Respond concisely. Do not invent test results, git status, or deployment URLs.`;
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-    if (IAM_ORIGIN) console.log(`IAM API proxy → ${IAM_ORIGIN}`);
-  });
+  startHttpServer(app, PORT, "0.0.0.0");
+  if (IAM_ORIGIN) console.log(`IAM API proxy → ${IAM_ORIGIN}`);
 }
 
 startServer();

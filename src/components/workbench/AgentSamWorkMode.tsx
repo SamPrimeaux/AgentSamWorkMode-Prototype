@@ -12,7 +12,7 @@ import {
   INITIAL_PWA_CACHE_STATUS,
   INITIAL_EXECOS_STATUS 
 } from '../../data/mockWorkbench';
-import { WorkbenchDiffSheet } from './WorkbenchDiffSheet';
+import { WorkbenchEditor } from './WorkbenchEditor';
 import { PwaCacheInspectorSheet } from './PwaCacheInspectorSheet';
 import { ExecOsLocalLaneSheet } from './ExecOsLocalLaneSheet';
 import { FlexFitComposer } from './FlexFitComposer';
@@ -83,6 +83,7 @@ export const AgentSamWorkMode: React.FC<AgentSamWorkModeProps> = ({
   const [isCacheInspectorOpen, setIsCacheInspectorOpen] = useState(false);
   const [isExecOsSheetOpen, setIsExecOsSheetOpen] = useState(false);
   const [isAgentComputerOpen, setIsAgentComputerOpen] = useState(false);
+  const [showCodeEditor, setShowCodeEditor] = useState(false);
   const [cacheStatus, setCacheStatus] = useState<PwaCacheStatus>(INITIAL_PWA_CACHE_STATUS);
   const [execOsStatus, setExecOsStatus] = useState<ExecOsLocalLaneStatus>(INITIAL_EXECOS_STATUS);
   const [selectedModel, setSelectedModel] = useState<ModelChoice>('gemini-3.5-flash');
@@ -187,6 +188,21 @@ export const AgentSamWorkMode: React.FC<AgentSamWorkModeProps> = ({
           </button>
 
           <button
+            onClick={() => setShowCodeEditor((v) => !v)}
+            title="Toggle Monaco code editor (paired machine files)"
+            aria-label="Toggle code editor"
+            className={cn(
+              'flex items-center gap-1.5 min-h-[44px] px-3 sm:px-3.5 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95 border',
+              showCodeEditor
+                ? 'bg-blue-600/20 text-blue-300 border-blue-500/30'
+                : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border-zinc-700',
+            )}
+          >
+            <FileCode size={14} />
+            <span className="hidden sm:inline">Code</span>
+          </button>
+
+          <button
             onClick={() => setIsAgentComputerOpen(true)}
             title="Open Agent Computer & Live Browser Runtime"
             aria-label="Open Agent Computer"
@@ -230,6 +246,11 @@ export const AgentSamWorkMode: React.FC<AgentSamWorkModeProps> = ({
         
         {/* Main Conversation & Execution Stream */}
         <div className="flex-1 flex flex-col min-h-0 overflow-y-auto relative no-scrollbar">
+          {showCodeEditor && (
+            <div className="shrink-0 px-4 sm:px-8 pt-4 pb-2">
+              <WorkbenchEditor className="h-[min(48vh,520px)]" />
+            </div>
+          )}
           <div className="w-full max-w-3xl sm:max-w-4xl mx-auto px-4 sm:px-8 pt-6 pb-36 space-y-6 flex-1 flex flex-col">
             {messages.length === 0 && !isProcessing && (
               <div className="flex-1 flex flex-col items-center justify-center text-center py-16 px-6">

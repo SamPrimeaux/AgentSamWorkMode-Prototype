@@ -55,7 +55,12 @@ Prototype `server.ts` mounts a **local in-memory store** for `/api/terminal/pair
 
 Production: apply `patches/0006-feat-device-pairing-bridge.patch` to AgentSamRemix (KV-backed, issues real `PTY_AUTH_TOKEN` via `generateUserPtyAuthToken`).
 
-## Security
+## xterm + Monaco (standalone prototype)
+
+- **Terminal drawer → Shell (xterm)** uses `@xterm/xterm` + FitAddon; connects to IAM WS or local bridge fallback.
+- **Code button / Files tab** opens Monaco editor backed by `agentsam-bridge` filesystem (`/api/bridge/fs/*`).
+- Start bridge: `npm run bridge -- run` (PTY on `:3099` + file API).
+
 
 - Users never receive `AGENTSAM_BRIDGE_KEY`
 - Per-device `PTY_AUTH_TOKEN` encrypted in D1 `user_secrets`
