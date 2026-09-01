@@ -33,38 +33,27 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
   website,
   onUpdateWebsite
 }) => {
-  const [deployStep, setDeployStep] = useState<number>(3); // 0: compiling, 1: optimizing, 2: provisioning, 3: completed
+  const [deployStep, setDeployStep] = useState<number>(0);
   const [isDeploying, setIsDeploying] = useState<boolean>(false);
   const [copiedUrl, setCopiedUrl] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'deploy' | 'export' | 'domain'>('deploy');
   const [customDomainInput, setCustomDomainInput] = useState(website.deployment?.customDomain || '');
 
-  const liveUrl = website.deployment?.deployedUrl || `https://${website.deployment?.subdomain || 'preview'}.apexdynamics.ai`;
+  const liveUrl = website.deployment?.deployedUrl || '';
 
   const handleStartDeploy = () => {
     setIsDeploying(true);
     setDeployStep(0);
-
-    setTimeout(() => setDeployStep(1), 700);
-    setTimeout(() => setDeployStep(2), 1400);
-    setTimeout(() => {
-      setDeployStep(3);
-      setIsDeploying(false);
-      const newVersion = `v2.${Math.floor(Math.random() * 9) + 4}.${Math.floor(Math.random() * 9) + 1}`;
-      const newHash = Math.random().toString(36).substring(2, 9);
-      onUpdateWebsite({
-        ...website,
-        deployment: {
-          ...website.deployment,
-          status: 'deployed',
-          version: newVersion,
-          commitHash: newHash,
-          lastDeployedAt: 'Just now (' + newVersion + ')',
-          sslStatus: 'active'
-        }
-      });
-      confetti({ particleCount: 60, spread: 80 });
-    }, 2200);
+    setDeployStep(1);
+    setIsDeploying(false);
+    onUpdateWebsite({
+      ...website,
+      deployment: {
+        ...website.deployment,
+        status: 'idle',
+        lastDeployedAt: '',
+      },
+    });
   };
 
   const handleCopy = (text: string) => {

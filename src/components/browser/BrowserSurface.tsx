@@ -54,34 +54,10 @@ export const BrowserSurface: React.FC<BrowserSurfaceProps> = ({
   className,
   isCompact = false
 }) => {
-  const defaultSession: LiveBrowserSession = {
-    sessionId: 'brows-sess-live-01',
-    agentRunId: 'run-inneranimal-prod',
-    targetUrl: 'http://localhost:3000/api/health',
-    pageTitle: 'Agent Workspace App Preview & Runtime Validation',
-    status: 'ready',
-    controlMode: 'agent',
-    liveViewMode: 'tab',
-    sslSecured: true,
-    viewportDimensions: { width: 1280, height: 800 },
-    eventsTimeline: [
-      { id: 'ev-1', timestamp: '09:41:02', statusText: 'Spawning Chromium Sandbox', action: 'Initialized headless Chromium on edge runtime' },
-      { id: 'ev-2', timestamp: '09:41:04', statusText: 'Loaded Workspace Entrypoint', url: 'http://localhost:3000' },
-      { id: 'ev-3', timestamp: '09:41:06', statusText: 'Hydrating React Component Tree', action: 'Verified React 18 & Tailwind CSS DOM tree' },
-      { id: 'ev-4', timestamp: '09:41:09', statusText: 'Runtime Ready for Validation', action: 'Interactive DOM inspection & AI functional testing active' }
-    ],
-    consoleLogs: [
-      { level: 'info', message: '[Vite:Client] Connected to local development server', timestamp: '09:41:04' },
-      { level: 'info', message: '[Runtime:Router] Route / rendered successfully (0ms latency)', timestamp: '09:41:05' },
-      { level: 'info', message: '[MCP:Dispatch] Verified MCP server registration for inneranimalmedia-mcp-server', timestamp: '09:41:07' },
-      { level: 'info', message: '[AST:Validator] Clean syntax validation, 0 fatal parser errors', timestamp: '09:41:08' }
-    ]
-  };
-
-  const session = initialSession || defaultSession;
-  const [controlMode, setControlMode] = useState<BrowserControlMode>(session.controlMode || 'agent');
-  const [viewMode, setViewMode] = useState<BrowserLiveViewMode>(session.liveViewMode || 'tab');
-  const [urlInput, setUrlInput] = useState(session.targetUrl);
+  const session = initialSession;
+  const [controlMode, setControlMode] = useState<BrowserControlMode>(session?.controlMode || 'agent');
+  const [viewMode, setViewMode] = useState<BrowserLiveViewMode>(session?.liveViewMode || 'tab');
+  const [urlInput, setUrlInput] = useState(session?.targetUrl || '');
   const [isReloading, setIsReloading] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [activeSubTab, setActiveSubTab] = useState<'viewport' | 'assertions' | 'timeline' | 'console'>('viewport');
@@ -89,13 +65,7 @@ export const BrowserSurface: React.FC<BrowserSurfaceProps> = ({
   
   // Interactive Validation State
   const [isRunningTests, setIsRunningTests] = useState(false);
-  const [assertions, setAssertions] = useState<TestAssertion[]>([
-    { id: 't-1', suite: 'AST & Code Syntax', name: 'TypeScript strict mode compilation', status: 'passed', durationMs: 42, details: '0 type errors across src/' },
-    { id: 't-2', suite: 'DOM & Routing', name: 'Mounts single-screen workbench layout', status: 'passed', durationMs: 18, details: 'Root container rendered with CSS grid' },
-    { id: 't-3', suite: 'MCP Operator Policy', name: 'Clean execution policy in dispatch.ts', status: 'passed', durationMs: 65, details: 'Unnecessary logger removed for policy compliance' },
-    { id: 't-4', suite: 'AI Schema Contract', name: 'agentsam_memory_search tool schema matches spec', status: 'passed', durationMs: 31, details: 'Schema arguments and return types validated' },
-    { id: 't-5', suite: 'PWA Edge Cache', name: 'Workbox ServiceWorker CacheFirst strategy', status: 'passed', durationMs: 14, details: 'Manifest warmed and offline-ready' },
-  ]);
+  const [assertions, setAssertions] = useState<TestAssertion[]>([]);
 
   // Interactive Live Playground State
   const [interactiveInput, setInteractiveInput] = useState('');
@@ -136,32 +106,26 @@ export const BrowserSurface: React.FC<BrowserSurfaceProps> = ({
   };
 
   const handleRunAllAssertions = () => {
-    setIsRunningTests(true);
-    setAssertions(prev => prev.map(a => ({ ...a, status: 'running' })));
-
-    setTimeout(() => {
-      setAssertions([
-        { id: 't-1', suite: 'AST & Code Syntax', name: 'TypeScript strict mode compilation', status: 'passed', durationMs: 38, details: '0 type errors across src/' },
-        { id: 't-2', suite: 'DOM & Routing', name: 'Mounts single-screen workbench layout', status: 'passed', durationMs: 15, details: 'Root container rendered with CSS grid' },
-        { id: 't-3', suite: 'MCP Operator Policy', name: 'Clean execution policy in dispatch.ts', status: 'passed', durationMs: 52, details: 'Unnecessary logger removed for policy compliance' },
-        { id: 't-4', suite: 'AI Schema Contract', name: 'agentsam_memory_search tool schema matches spec', status: 'passed', durationMs: 29, details: 'Schema arguments and return types validated' },
-        { id: 't-5', suite: 'PWA Edge Cache', name: 'Workbox ServiceWorker CacheFirst strategy', status: 'passed', durationMs: 12, details: 'Manifest warmed and offline-ready' },
-      ]);
-      setIsRunningTests(false);
-      confetti({ particleCount: 30, spread: 60 });
-    }, 700);
+    setIsRunningTests(false);
+    setAssertions([]);
   };
 
   const handleValidatePrompt = (e: React.FormEvent) => {
     e.preventDefault();
     if (!interactiveInput.trim()) return;
-
-    setIsValidatingPrompt(true);
-    setTimeout(() => {
-      setTestResponse(`[Verified 200 OK] Response synthesized successfully for input: "${interactiveInput}". Tokens: 124 in / 48 out (38ms latency).`);
-      setIsValidatingPrompt(false);
-    }, 450);
+    setTestResponse('Browser validation requires a live session. Connect Agent Computer to run assertions.');
+    setIsValidatingPrompt(false);
   };
+
+  if (!session) {
+    return (
+      <div className={cn("w-full h-full flex flex-col items-center justify-center bg-zinc-950 text-zinc-400 rounded-2xl border border-dashed border-zinc-800 p-8 text-center", className)}>
+        <Globe size={32} className="text-zinc-600 mb-3" />
+        <p className="text-sm font-medium text-zinc-300">No browser session</p>
+        <p className="text-xs text-zinc-500 mt-1 max-w-sm">Start a live browser session from Agent Computer to preview pages and run validation.</p>
+      </div>
+    );
+  }
 
   return (
     <div className={cn("w-full h-full flex flex-col bg-zinc-950 text-zinc-100 rounded-2xl border border-zinc-800 shadow-xl overflow-hidden select-text", className)}>
@@ -353,7 +317,7 @@ export const BrowserSurface: React.FC<BrowserSurfaceProps> = ({
                   </div>
                   <div>
                     <div className="font-bold text-sm text-white">Agent Sam Real-Time Runtime Preview</div>
-                    <div className="text-xs text-zinc-400 font-mono">Workspace: inneranimalmedia-mcp-server • branch: fix/terminal-operator-policy</div>
+                    <div className="text-xs text-zinc-400 font-mono truncate">{session.targetUrl || 'No URL loaded'}</div>
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-950/60 border border-emerald-800/40 text-emerald-400 text-xs font-mono">
