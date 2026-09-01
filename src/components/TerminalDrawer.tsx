@@ -48,17 +48,22 @@ interface TerminalDrawerProps {
   customLogs?: string[];
   initialSnapPosition?: TerminalSnapPosition;
   seedCommand?: string | null;
+  terminalConnected?: boolean;
+  authRequired?: boolean;
+  onExecCommand?: (command: string) => void;
 }
 
-function buildTerminalBanner(activePath: string, activeBranch: string): string[] {
+function buildTerminalBanner(activePath: string, activeBranch: string, opts?: { connected?: boolean; authRequired?: boolean }): string[] {
   const cwd = activePath || '~';
-  return [
-    `# Terminal — connect ExecOS local lane to run commands`,
+  const lines = [
+    `# Terminal — ${opts?.connected ? 'WebSocket connected' : 'connect ExecOS local lane or sign in'}`,
     `# Branch: ${activeBranch || 'unknown'}  Path: ${cwd || 'not set'}`,
-    `# Paste a command from the palette or type below once connected`,
-    ``,
-    `${cwd} % `,
   ];
+  if (opts?.authRequired) {
+    lines.push(`# Sign in at IAM origin (VITE_IAM_ORIGIN) then reload`);
+  }
+  lines.push(`# Palette commands run via /api/agent/terminal/exec when authenticated`, ``, `${cwd} % `);
+  return lines;
 }
 
 export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
@@ -70,6 +75,9 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
   customLogs,
   initialSnapPosition = 'split',
   seedCommand = null,
+  terminalConnected = false,
+  authRequired = false,
+  onExecCommand,
 }) => {
   const [activeTab, setActiveTab] = useState<'output' | 'files' | 'environment' | 'traces'>('output');
   const [snapPosition, setSnapPosition] = useState<TerminalSnapPosition>(initialSnapPosition);
@@ -87,16 +95,22 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
   const touchCurrentY = useRef<number | null>(null);
 
   const [logs, setLogs] = useState<string[]>(
-    customLogs && customLogs.length > 0 ? customLogs : buildTerminalBanner(activePath, activeBranch)
+    customLogs && customLogs.length > 0
+      ? customLogs
+      : buildTerminalBanner(activePath, activeBranch, { connected: terminalConnected, authRequired }),
   );
 
   useEffect(() => {
     if (customLogs && customLogs.length > 0) {
       setLogs(customLogs);
-    } else if (!isOpen) {
-      setLogs(buildTerminalBanner(activePath, activeBranch));
     }
-  }, [customLogs, activePath, activeBranch, isOpen]);
+  }, [customLogs]);
+
+  useEffect(() => {
+    if (!customLogs?.length) {
+      setLogs(buildTerminalBanner(activePath, activeBranch, { connected: terminalConnected, authRequired }));
+    }
+  }, [activePath, activeBranch, terminalConnected, authRequired, customLogs?.length]);
 
   useEffect(() => {
     if (!seedCommand || !isOpen) return;
@@ -191,9 +205,17 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
     setLogs(prev => [
       ...prev,
       `${activePath || '~'} % ${cmd}`,
-      `[ExecOS not connected] Command queued locally. Connect the local lane (port 3099) to execute.`,
-      `${activePath || '~'} % `
     ]);
+
+    if (onExecCommand) {
+      onExecCommand(cmd);
+    } else {
+      setLogs(prev => [
+        ...prev,
+        `[ExecOS not connected] Command queued locally. Connect the local lane (port 3099) to execute.`,
+        `${activePath || '~'} % `,
+      ]);
+    }
     setIsRunning(false);
     setOwnershipState('idle');
   };

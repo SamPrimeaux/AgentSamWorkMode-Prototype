@@ -99,7 +99,16 @@ See `app/workmode/README.md` in AgentSamRemix after applying the patch.
 
 ## Preview the standalone Work Mode UI
 
-The Vite prototype in this repo can be deployed as a static SPA on Cloudflare Workers.
+See **`docs/AUTH_EXECOS_WIRING.md`** for the full auth / ExecOS / git / storage audit and wiring guide.
+
+### Platform APIs (git, terminal, CMS, artifacts)
+
+```bash
+cp .env.example .env
+# Set VITE_IAM_ORIGIN + VITE_WORKSPACE_ID
+npm run dev   # proxies /api/agent/* → Worker
+```
+
 
 ### Local
 

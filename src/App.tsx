@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   AppMode, 
   FlexLayoutMode,
@@ -20,6 +20,13 @@ import {
   createEmptyWebsite,
 } from './lib/emptyState';
 import { executeAgentSamTask } from './services/agentEngine';
+import { PlatformProvider, usePlatform } from './contexts/PlatformContext';
+import { useGitBridge } from './hooks/useGitBridge';
+import { useShellBridge } from './hooks/useShellBridge';
+import { useArtifactsBridge } from './hooks/useArtifactsBridge';
+import { useCmsBridge } from './hooks/useCmsBridge';
+import { useTelemetryBridge } from './hooks/useTelemetryBridge';
+import { useTerminalBridge } from './hooks/useTerminalBridge';
 
 // Configuration and Navigation Architecture
 import { ConfigurationProvider, useConfiguration } from './contexts/ConfigurationContext';
@@ -42,6 +49,11 @@ import { Smartphone, Columns } from 'lucide-react';
 
 function AppInner() {
   const { config, setActiveBranch: setConfigBranch, setActivePath: setConfigPath } = useConfiguration();
+  const platform = usePlatform();
+  const { openShellTerminal, runInShellTerminal } = useShellBridge();
+  const git = useGitBridge(platform.workspaceId);
+  const artifacts = useArtifactsBridge(config.clientBrandName);
+  const cms = useCmsBridge(config.clientBrandName);
 
   // Navigation & View State
   const [mode, setMode] = useState<AppMode>('work');
@@ -70,6 +82,7 @@ function AppInner() {
   const handleBranchChange = (newBranch: string) => {
     setActiveBranchState(newBranch);
     setConfigBranch(newBranch);
+    if (git.live) void git.checkoutBranch(newBranch);
   };
 
   const handlePathChange = (newPath: string) => {
@@ -85,7 +98,48 @@ function AppInner() {
   const [brandKit, setBrandKit] = useState<BrandKitData>(() => createEmptyBrandKit(config));
   const [collaborators, setCollaborators] = useState<CollaboratorAgent[]>(() => createEmptyCollaborators());
   const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
-  const [telemetryLogs, setTelemetryLogs] = useState<any[]>([]);
+  const [localTelemetry, setLocalTelemetry] = useState<any[]>([]);
+  const telemetryLogs = useTelemetryBridge(localTelemetry);
+
+  const appendTerminalLine = useCallback((line: string) => {
+    setTerminalLogs((prev) => [...prev, line]);
+  }, []);
+
+  const terminal = useTerminalBridge({
+    workspaceId: platform.workspaceId,
+    onOutputLine: appendTerminalLine,
+  });
+
+  // Sync live git branch / repo path from platform API
+  useEffect(() => {
+    if (git.live && git.activeBranch) {
+      setActiveBranchState(git.activeBranch);
+      setConfigBranch(git.activeBranch);
+    }
+    if (git.repoFullName) {
+      setActivePathState(git.repoFullName);
+      setConfigPath(git.repoFullName);
+    }
+  }, [git.live, git.activeBranch, git.repoFullName, setConfigBranch, setConfigPath]);
+
+  // Hydrate deck / brand from artifact store when available
+  useEffect(() => {
+    if (artifacts.artifacts.length > 0 && artifacts.deck.slides.length > 0) {
+      setDeck(artifacts.deck);
+    }
+  }, [artifacts.artifacts.length, artifacts.deck.slides.length]);
+
+  useEffect(() => {
+    if (artifacts.brandKit.generatedImages.length || artifacts.brandKit.generatedVideos.length) {
+      setBrandKit(artifacts.brandKit);
+    }
+  }, [artifacts.brandKit]);
+
+  useEffect(() => {
+    if (cms.website.blocks.length > 0 || cms.website.navLinks.length > 0) {
+      setWebsite(cms.website);
+    }
+  }, [cms.website]);
 
   // Sync dark mode class with HTML element and localStorage
   useEffect(() => {
@@ -123,7 +177,7 @@ function AppInner() {
       const result = await executeAgentSamTask(text, model);
 
       if (result.telemetry) {
-        setTelemetryLogs((prev) => [...prev, result.telemetry!]);
+        setLocalTelemetry((prev) => [...prev, result.telemetry!]);
       }
 
       const agentMsg: ChatMessageItem = {
@@ -157,7 +211,16 @@ function AppInner() {
   const handleRunPaletteCommand = (command: string) => {
     setTerminalSeedCommand(command);
     setIsTerminalOpen(true);
+    openShellTerminal('local');
+    runInShellTerminal(command, 'local');
+    void terminal.execCommand(command);
   };
+
+  const handleOpenTerminal = useCallback(() => {
+    setIsTerminalOpen(true);
+    openShellTerminal('local');
+    void terminal.connectWebSocket();
+  }, [openShellTerminal, terminal]);
 
   useCommandPaletteShortcut(() => setCommandPaletteOpen(true));
 
@@ -204,7 +267,7 @@ function AppInner() {
           workSubTab={workSubTab}
           onWorkSubTabChange={setWorkSubTab}
           onQuickAction={() => {}}
-          onOpenTerminal={() => setIsTerminalOpen(true)}
+          onOpenTerminal={handleOpenTerminal}
           onOpenCommandPalette={() => setCommandPaletteOpen(true)}
           isDarkMode={isDarkMode}
           onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
@@ -222,7 +285,7 @@ function AppInner() {
             onModeChange={setMode}
             currentWorkSubTab={workSubTab}
             onWorkSubTabChange={setWorkSubTab}
-            onOpenTerminal={() => setIsTerminalOpen(true)}
+            onOpenTerminal={handleOpenTerminal}
             isDarkMode={isDarkMode}
             onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
             activePath={activePath}
@@ -251,7 +314,7 @@ function AppInner() {
                     isProcessing={isProcessing}
                     selectedModel={selectedModel}
                     onSelectModel={setSelectedModel}
-                    onOpenTerminal={() => setIsTerminalOpen(true)}
+                    onOpenTerminal={handleOpenTerminal}
                     onNavigateToWork={() => setMode('work')}
                     activeBranch={activeBranch}
                     activePath={activePath}
@@ -281,7 +344,7 @@ function AppInner() {
                     collaborators={collaborators}
                     telemetryLogs={telemetryLogs}
                     onPresentDeck={() => setIsPresentationOpen(true)}
-                    onOpenTerminal={() => setIsTerminalOpen(true)}
+                    onOpenTerminal={handleOpenTerminal}
                     onDispatchAgentMessage={(msg) => handleSendMessage(msg, selectedModel)}
                     chatMessages={messages}
                     isAgentProcessing={isProcessing}
@@ -300,7 +363,7 @@ function AppInner() {
                     isProcessing={isProcessing}
                     selectedModel={selectedModel}
                     onSelectModel={setSelectedModel}
-                    onOpenTerminal={() => setIsTerminalOpen(true)}
+                    onOpenTerminal={handleOpenTerminal}
                     onNavigateToWork={() => setMode('work')}
                     activeBranch={activeBranch}
                     activePath={activePath}
@@ -321,7 +384,7 @@ function AppInner() {
                     collaborators={collaborators}
                     telemetryLogs={telemetryLogs}
                     onPresentDeck={() => setIsPresentationOpen(true)}
-                    onOpenTerminal={() => setIsTerminalOpen(true)}
+                    onOpenTerminal={handleOpenTerminal}
                     onDispatchAgentMessage={(msg) => handleSendMessage(msg, selectedModel)}
                     chatMessages={messages}
                     isAgentProcessing={isProcessing}
@@ -339,11 +402,14 @@ function AppInner() {
       <TerminalDrawer
         isOpen={isTerminalOpen}
         onClose={() => setIsTerminalOpen(false)}
-        onOpen={() => setIsTerminalOpen(true)}
+        onOpen={handleOpenTerminal}
         activeBranch={activeBranch}
         activePath={activePath}
         customLogs={terminalLogs}
         seedCommand={terminalSeedCommand}
+        terminalConnected={terminal.connected}
+        authRequired={terminal.authRequired || git.authRequired}
+        onExecCommand={(cmd) => void terminal.execCommand(cmd)}
       />
 
       <CfUnifiedCommandPalette
@@ -365,9 +431,11 @@ function AppInner() {
 export default function App() {
   return (
     <ConfigurationProvider>
-      <Sidebar.Provider defaultCollapsed={false}>
-        <AppInner />
-      </Sidebar.Provider>
+      <PlatformProvider>
+        <Sidebar.Provider defaultCollapsed={false}>
+          <AppInner />
+        </Sidebar.Provider>
+      </PlatformProvider>
     </ConfigurationProvider>
   );
 }
