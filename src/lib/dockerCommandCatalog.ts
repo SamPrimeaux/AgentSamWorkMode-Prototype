@@ -2,7 +2,7 @@
  * Docker command catalog for Cmd+K / runtime target actions.
  * Mirrors wranglerCommandCatalog.ts — same shape, same risk model, same exec path
  * (commands are sent as plain strings through useTerminalBridge().execCommand()
- * on whichever ExecutionLane is currently active — local_mac or gcp_vm).
+ * on whichever ExecutionLane is currently active — local_exc or gcp_vm).
  *
  * Design intent: Docker is NOT a new ExecutionLane. It's just another catalog of
  * shell commands that runs through the lane you already have selected. This keeps

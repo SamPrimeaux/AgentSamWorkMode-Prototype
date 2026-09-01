@@ -14,7 +14,7 @@ export const ExecutionLanePill: React.FC<ExecutionLanePillProps> = ({
 }) => {
   const getIcon = () => {
     switch (status.activeLane) {
-      case 'local_mac':
+      case 'local_exc':
         return <Laptop size={14} className="text-emerald-400" />;
       case 'gcp_vm':
         return <Cloud size={14} className="text-blue-400" />;
@@ -25,8 +25,8 @@ export const ExecutionLanePill: React.FC<ExecutionLanePillProps> = ({
 
   const getLabel = () => {
     switch (status.activeLane) {
-      case 'local_mac':
-        return 'Local Mac';
+      case 'local_exc':
+        return 'Local exec';
       case 'gcp_vm':
         return 'GCP VM';
       case 'cloud_sandbox':

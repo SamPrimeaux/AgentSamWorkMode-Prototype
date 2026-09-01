@@ -118,7 +118,7 @@ export function createDisconnectedPwaStatus(): PwaCacheStatus {
 export function createDisconnectedExecOsStatus(config?: Partial<AppConfig>): ExecOsLocalLaneStatus {
   const cfg = { ...getEnvironmentConfig(), ...config };
   return {
-    activeLane: 'local_mac',
+    activeLane: 'local_exc',
     isConnected: false,
     latencyMs: 0,
     daemonPort: cfg.execOsPort,

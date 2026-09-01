@@ -463,23 +463,23 @@ module.exports = {
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {/* Option 1: Local Mac Lane */}
+                  {/* Option 1: Local execution lane */}
                   <button
-                    onClick={() => handleLaneChange('local_mac')}
+                    onClick={() => handleLaneChange('local_exc')}
                     className={cn(
                       "p-4 rounded-2xl border text-left transition-all space-y-2",
-                      status.activeLane === 'local_mac'
+                      status.activeLane === 'local_exc'
                         ? "bg-emerald-500/15 border-emerald-500/40 shadow-sm"
                         : "bg-white/[0.02] border-white/[0.06] hover:bg-white/[0.04]"
                     )}
                   >
                     <div className="flex items-center justify-between">
-                      <Laptop size={16} className={status.activeLane === 'local_mac' ? "text-emerald-400" : "text-white/40"} />
+                      <Laptop size={16} className={status.activeLane === 'local_exc' ? "text-emerald-400" : "text-white/40"} />
                       <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                     </div>
-                    <div className="text-sm font-semibold text-white">Local Mac (ExecOS)</div>
+                    <div className="text-sm font-semibold text-white">Local exec (ExecOS)</div>
                     <div className="text-[11px] text-white/50 leading-tight">
-                      Direct tunnel to your real macOS machine & repos.
+                      Direct tunnel to your machine & repos.
                     </div>
                   </button>
 

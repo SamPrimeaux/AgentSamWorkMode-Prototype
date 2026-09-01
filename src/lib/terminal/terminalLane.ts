@@ -30,7 +30,7 @@ export function executionLaneToTarget(lane: ExecutionLane): TerminalLaneTarget {
 export function targetToExecutionLane(target: TerminalLaneTarget): ExecutionLane {
   if (target === 'platform_vm') return 'gcp_vm';
   if (target === 'sandbox') return 'cloud_sandbox';
-  return 'local_mac';
+  return 'local_exc';
 }
 
 export function readPreferredTerminalLane(): TerminalLaneTarget {
