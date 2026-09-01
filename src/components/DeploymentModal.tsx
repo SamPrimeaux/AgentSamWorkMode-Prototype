@@ -251,6 +251,15 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
           {/* ================= TAB 1: DEPLOYMENT STATUS ================= */}
           {activeTab === 'deploy' && (
             <div className="space-y-4">
+              <RuntimeTargetPicker currentTarget={runtimeTarget} onChangeTarget={setRuntimeTarget} />
+
+              {runtimeTarget === 'docker_local' ? (
+                <DockerDeployPanel
+                  appSlug={website.clientName.toLowerCase().replace(/\s+/g, '-')}
+                  defaultAppType="static"
+                />
+              ) : (
+                <>
               {/* Live URL Banner */}
               <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-3 flex-wrap">
                 <div className="space-y-0.5">
