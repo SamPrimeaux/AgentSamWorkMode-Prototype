@@ -79,6 +79,7 @@ function AppInner() {
   const [brandKit, setBrandKit] = useState<BrandKitData>(() => getDynamicBrandKit(config));
   const [collaborators, setCollaborators] = useState<CollaboratorAgent[]>(() => getDynamicCollaborators(config));
   const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
+  const [telemetryLogs, setTelemetryLogs] = useState<any[]>([]);
 
   // Sync dark mode class with HTML element and localStorage
   useEffect(() => {
@@ -150,6 +151,10 @@ function AppInner() {
 
       if (result.terminalLogs && result.terminalLogs.length > 0) {
         setTerminalLogs(result.terminalLogs);
+      }
+      
+      if (result.telemetry) {
+        setTelemetryLogs((prev) => [...prev, result.telemetry!]);
       }
 
       const agentMsg: ChatMessageItem = {
@@ -302,6 +307,7 @@ function AppInner() {
                     brandKit={brandKit}
                     onUpdateBrandKit={setBrandKit}
                     collaborators={collaborators}
+                    telemetryLogs={telemetryLogs}
                     onPresentDeck={() => setIsPresentationOpen(true)}
                     onOpenTerminal={() => setIsTerminalOpen(true)}
                     onDispatchAgentMessage={(msg) => handleSendMessage(msg, selectedModel)}
@@ -337,6 +343,7 @@ function AppInner() {
                     brandKit={brandKit}
                     onUpdateBrandKit={setBrandKit}
                     collaborators={collaborators}
+                    telemetryLogs={telemetryLogs}
                     onPresentDeck={() => setIsPresentationOpen(true)}
                     onOpenTerminal={() => setIsTerminalOpen(true)}
                     onDispatchAgentMessage={(msg) => handleSendMessage(msg, selectedModel)}

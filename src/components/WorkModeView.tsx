@@ -47,6 +47,8 @@ import { LiveWebsiteSandbox } from './LiveWebsiteSandbox';
 import { RealtimeCmsEditor } from './RealtimeCmsEditor';
 import { DeploymentModal } from './DeploymentModal';
 import { AgentSamWorkMode } from './workbench/AgentSamWorkMode';
+import { TelemetryDashboard } from './workbench/TelemetryDashboard';
+import { TelemetryData } from '../lib/telemetry';
 
 interface WorkModeViewProps {
   subTab?: WorkSubTab;
@@ -59,6 +61,7 @@ interface WorkModeViewProps {
   brandKit: BrandKitData;
   onUpdateBrandKit: (brandKit: BrandKitData) => void;
   collaborators: CollaboratorAgent[];
+  telemetryLogs: TelemetryData[];
   onPresentDeck: () => void;
   onOpenTerminal: () => void;
   onDispatchAgentMessage?: (message: string) => void;
@@ -75,6 +78,7 @@ export const WorkModeView: React.FC<WorkModeViewProps> = ({
   brandKit,
   onUpdateBrandKit,
   collaborators,
+  telemetryLogs,
   onPresentDeck,
   onOpenTerminal,
   onDispatchAgentMessage
@@ -202,7 +206,7 @@ export const WorkModeView: React.FC<WorkModeViewProps> = ({
             </button>
             <span className="text-zinc-400 dark:text-zinc-600">/</span>
             <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100 capitalize">
-              {subTab === 'presentations' ? 'Presentation Deck' : subTab === 'websites' ? 'Websites & CMS' : subTab === 'dashboards' ? 'Telemetry Dashboards' : subTab === 'brand' ? 'Brand Studio' : 'Live Collaboration'}
+              {subTab === 'presentations' ? 'Presentation Deck' : subTab === 'websites' ? 'Websites & CMS' : subTab === 'dashboards' ? 'Telemetry Dashboards' : subTab === 'brand' ? 'Brand Studio' : subTab === 'telemetry' ? 'Telemetry' : 'Live Collaboration'}
             </span>
           </div>
 
@@ -744,6 +748,12 @@ export const WorkModeView: React.FC<WorkModeViewProps> = ({
                 ))}
               </div>
             </div>
+          </div>
+        )}
+
+        {subTab === 'telemetry' && (
+          <div className="max-w-4xl mx-auto space-y-4">
+            <TelemetryDashboard logs={telemetryLogs} />
           </div>
         )}
 

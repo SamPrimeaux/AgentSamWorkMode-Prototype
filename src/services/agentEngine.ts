@@ -1,4 +1,5 @@
 import { ModelChoice, TaskTrace, SlideItem, ClientWebsiteData, GeneratedImageItem, GeneratedVideoItem } from '../types';
+import { TelemetryData } from '../lib/telemetry';
 
 export interface AgentRunResult {
   text: string;
@@ -8,6 +9,7 @@ export interface AgentRunResult {
   newImage?: GeneratedImageItem;
   newVideo?: GeneratedVideoItem;
   terminalLogs?: string[];
+  telemetry?: TelemetryData;
 }
 
 export async function executeAgentSamTask(
@@ -47,6 +49,15 @@ When discussing code, files, or presentations, be precise and reference specific
   } catch (err: any) {
     console.warn('Backend Gemini API notice (falling back to execution synthesizer):', err?.message || err);
   }
+
+  const endTime = performance.now();
+  const telemetry = {
+    latencyMs: endTime - startTime,
+    inputTokens: Math.floor(Math.random() * 1000), // Mocked for demo
+    outputTokens: Math.floor(Math.random() * 500), // Mocked for demo
+    model,
+    cost: 0 // Will calculate in dashboard
+  };
 
   // Determine intent & generate rich agent execution trace
   const isTestOrCommand = lowerPrompt.includes('test') || lowerPrompt.includes('run') || lowerPrompt.includes('auth') || lowerPrompt.includes('push') || lowerPrompt.includes('build');
@@ -323,6 +334,7 @@ Duration     4.32s
     websiteUpdates,
     newImage,
     newVideo,
-    terminalLogs
+    terminalLogs,
+    telemetry
   };
 }

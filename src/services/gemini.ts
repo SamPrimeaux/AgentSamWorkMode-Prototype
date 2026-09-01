@@ -5,6 +5,7 @@
 
 import { GoogleGenAI, Type, Content } from "@google/genai";
 import realData from '../data.json';
+import { logTelemetry, calculateCost } from '../lib/telemetry';
 
 // Initialize Gemini Client
 // We use the 'gemini-2.5-flash-latest' model as requested for "Gemini Flash"
@@ -646,10 +647,22 @@ console.log(MODEL_NAME)
   // Send message
   try {
     // Start the turn
+    const startTime = performance.now();
     let result = await ai.models.generateContent({
       model: MODEL_NAME,
       contents: contents,
       config: config
+    });
+    const endTime = performance.now();
+    const usage = (result as any).usageMetadata;
+    const inputTokens = usage?.promptTokenCount || 0;
+    const outputTokens = usage?.candidatesTokenCount || 0;
+    logTelemetry({
+      latencyMs: endTime - startTime,
+      inputTokens,
+      outputTokens,
+      model: MODEL_NAME,
+      cost: calculateCost(MODEL_NAME, inputTokens, outputTokens)
     });
 
     // Loop for tool calls

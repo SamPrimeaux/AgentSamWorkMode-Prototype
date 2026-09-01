@@ -184,13 +184,6 @@ export const AgentSamWorkMode: React.FC<AgentSamWorkModeProps> = ({
       <header className="w-full px-3 sm:px-6 py-2.5 sm:py-3 border-b border-zinc-800/80 bg-[#18181b]/95 backdrop-blur-md flex items-center justify-between z-20 shrink-0 min-h-[52px]">
         {/* Left Side: Window dots + Sidebar Toggle + Title */}
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-          {/* macOS Style Window Action Dots */}
-          <div className="hidden sm:flex items-center gap-1.5 shrink-0 mr-1">
-            <span className="w-3 h-3 rounded-full bg-[#ff5f56] border border-[#e0443e] inline-block shadow-2xs" />
-            <span className="w-3 h-3 rounded-full bg-[#ffbd2e] border border-[#dea123] inline-block shadow-2xs" />
-            <span className="w-3 h-3 rounded-full bg-[#27c93f] border border-[#1aab29] inline-block shadow-2xs" />
-          </div>
-
           {/* Sidebar Toggle Button */}
           <button
             onClick={toggleSidebar}

@@ -1,6 +1,6 @@
 export type AppMode = 'chat' | 'work';
 export type FlexLayoutMode = 'split' | 'single' | 'phone';
-export type WorkSubTab = 'workbench' | 'presentations' | 'websites' | 'dashboards' | 'brand' | 'team';
+export type WorkSubTab = 'workbench' | 'presentations' | 'websites' | 'dashboards' | 'brand' | 'team' | 'telemetry';
 export type ModelChoice = 'gemini-3.5-flash' | 'gemini-3.1-pro-preview' | 'gemini-3.1-flash-lite';
 
 export type WorkbenchViewLevel = 'inbox' | 'workspace' | 'pr_review';

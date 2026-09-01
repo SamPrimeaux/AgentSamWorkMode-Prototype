@@ -3,6 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import { logTelemetry, calculateCost } from "./src/lib/telemetry";
 
 dotenv.config();
 
@@ -54,6 +55,7 @@ You build client marketing presentations, high-converting websites with responsi
 Respond concisely, with high confidence, professional tone, and actionable steps.
 When discussing code, files, or presentations, be precise and mention exact metrics or files.`;
 
+      const startTime = performance.now();
       const response = await ai.models.generateContent({
         model: model,
         contents: prompt,
@@ -61,6 +63,17 @@ When discussing code, files, or presentations, be precise and mention exact metr
           systemInstruction: systemInstruction || defaultSystem,
           temperature: 0.7,
         },
+      });
+      const endTime = performance.now();
+      const usage = (response as any).usageMetadata;
+      const inputTokens = usage?.promptTokenCount || 0;
+      const outputTokens = usage?.candidatesTokenCount || 0;
+      logTelemetry({
+        latencyMs: endTime - startTime,
+        inputTokens,
+        outputTokens,
+        model: model,
+        cost: calculateCost(model, inputTokens, outputTokens)
       });
 
       return res.json({
