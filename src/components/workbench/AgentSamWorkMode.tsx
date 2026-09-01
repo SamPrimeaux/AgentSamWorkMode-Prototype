@@ -5,10 +5,10 @@ import {
   WorkbenchViewLevel,
   PwaCacheStatus,
   ExecOsLocalLaneStatus,
-  ModelChoice
+  ModelChoice,
+  ChatMessageItem,
 } from '../../types';
 import { 
-  INITIAL_WORKBENCH_WORKSPACES, 
   INITIAL_PWA_CACHE_STATUS,
   INITIAL_EXECOS_STATUS 
 } from '../../data/mockWorkbench';
@@ -47,32 +47,29 @@ import {
 import { useSidebar } from '../navigation/Sidebar';
 import { cn } from '../../lib/utils';
 
-interface WorkMessage {
-  id: string;
-  role: 'user' | 'agent';
-  content: string;
-  timestamp: string;
-  executionTime?: string;
-  statusLines?: string[];
-  validationLines?: string[];
-  conclusion?: string;
-}
-
 interface AgentSamWorkModeProps {
   onDispatchAgentMessage: (message: string) => void;
   onOpenTerminal?: () => void;
+  messages?: ChatMessageItem[];
+  isProcessing?: boolean;
+  activePath?: string;
+  activeBranch?: string;
 }
 
 export const AgentSamWorkMode: React.FC<AgentSamWorkModeProps> = ({
   onDispatchAgentMessage,
-  onOpenTerminal
+  onOpenTerminal,
+  messages = [],
+  isProcessing = false,
+  activePath = '',
+  activeBranch = 'main',
 }) => {
   const { toggleSidebar, isCollapsed } = useSidebar();
   
   // Inspector Drawer State
   const [isInspectorOpen, setIsInspectorOpen] = useState(true);
   const [isTraceExpanded, setIsTraceExpanded] = useState(false);
-  const [repoTitle, setRepoTitle] = useState('Create AgentSamWorkMode repo');
+  const [repoTitle, setRepoTitle] = useState(activePath || 'Work Mode');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [likedMap, setLikedMap] = useState<Record<string, boolean>>({});
   const [dislikedMap, setDislikedMap] = useState<Record<string, boolean>>({});
@@ -84,43 +81,7 @@ export const AgentSamWorkMode: React.FC<AgentSamWorkModeProps> = ({
   const [isAgentComputerOpen, setIsAgentComputerOpen] = useState(false);
   const [cacheStatus, setCacheStatus] = useState<PwaCacheStatus>(INITIAL_PWA_CACHE_STATUS);
   const [execOsStatus, setExecOsStatus] = useState<ExecOsLocalLaneStatus>(INITIAL_EXECOS_STATUS);
-  const [isProcessing, setIsProcessing] = useState(false);
   const [selectedModel, setSelectedModel] = useState<ModelChoice>('gemini-3.5-flash');
-
-  // Work Mode Messages Thread (preloaded with sample conversation from reference screenshot)
-  const [messages, setMessages] = useState<WorkMessage[]>([
-    {
-      id: 'msg-1',
-      role: 'user',
-      content: 'can you inspect our inneranimalmedia-mcp-server and see if its up to date/not drifting?',
-      timestamp: 'Just now'
-    },
-    {
-      id: 'msg-2',
-      role: 'agent',
-      content: 'The inneranimalmedia-mcp-server checkout is clean and synchronized with its remote feature branch, but it is not fully aligned with main.',
-      timestamp: 'Just now',
-      executionTime: 'Worked for 29s',
-      statusLines: [
-        'Branch: fix/terminal-operator-policy',
-        'Working tree: clean',
-        'Remote tracking: exact match, 0 ahead / 0 behind',
-        'Compared with origin/main: 2 commits ahead',
-        'Main currently points to e4233c5; this branch points to f04166f',
-        'No untracked or uncommitted files'
-      ],
-      validationLines: [
-        'Catalog smoke checks: passed',
-        'Full test suite: failed in 2 tests:',
-        '  • index.js dispatch ratchet',
-        '  • agentsam_memory_search schema',
-        'Failures indicate test/code drift:',
-        '  • dispatch implementation still contains logAgentsamMcpToolExecution where the ratchet expects it removed',
-        '  • memory-search description no longer matches the expected canonical wording'
-      ],
-      conclusion: 'The branch is internally clean and remote-synchronized, but has drifted from canonical main tests. Dispatch ratchets and memory-search schema require alignment.'
-    }
-  ]);
 
   const handleCopy = (id: string, text: string) => {
     navigator.clipboard.writeText(text);
@@ -143,38 +104,9 @@ export const AgentSamWorkMode: React.FC<AgentSamWorkModeProps> = ({
   };
 
   const handleComposerSubmit = (text: string, model?: ModelChoice) => {
-    const userMsg: WorkMessage = {
-      id: 'msg-' + Date.now(),
-      role: 'user',
-      content: text,
-      timestamp: 'Just now'
-    };
-
-    setMessages((prev) => [...prev, userMsg]);
-    setIsProcessing(true);
-
-    // Dispatch to parent agent engine
+    if (!text.trim()) return;
     onDispatchAgentMessage(text);
-
-    // Simulate real-time agent output in work thread
-    setTimeout(() => {
-      const agentMsg: WorkMessage = {
-        id: 'msg-' + (Date.now() + 1),
-        role: 'agent',
-        content: `Executed operation for "${text.slice(0, 48)}...". All local execution lanes and MCP tools inspected successfully.`,
-        timestamp: 'Just now',
-        executionTime: 'Worked for 14s',
-        statusLines: [
-          `Target: ${repoTitle}`,
-          `Model: ${model || selectedModel}`,
-          `Runtime: Port ${execOsStatus.daemonPort || 3099} (Local Lane Active)`,
-          'State: Synchronized & Verified'
-        ],
-        conclusion: 'Ready for next instruction or deployment.'
-      };
-      setMessages((prev) => [...prev, agentMsg]);
-      setIsProcessing(false);
-    }, 1200);
+    if (model) setSelectedModel(model);
   };
 
   return (
@@ -280,6 +212,19 @@ export const AgentSamWorkMode: React.FC<AgentSamWorkModeProps> = ({
         {/* Main Conversation & Execution Stream */}
         <div className="flex-1 flex flex-col min-h-0 overflow-y-auto relative no-scrollbar">
           <div className="w-full max-w-3xl sm:max-w-4xl mx-auto px-4 sm:px-8 pt-6 pb-36 space-y-6 flex-1 flex flex-col">
+            {messages.length === 0 && !isProcessing && (
+              <div className="flex-1 flex flex-col items-center justify-center text-center py-16 px-6">
+                <div className="w-14 h-14 rounded-2xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center mb-4">
+                  <Bot size={28} className="text-purple-400" />
+                </div>
+                <h2 className="text-lg font-semibold text-zinc-100 mb-2">Start a work session</h2>
+                <p className="text-sm text-zinc-400 max-w-md">
+                  Ask Agent Sam to inspect a repo, run commands, review changes, or build assets.
+                  {activePath ? ` Connected path: ${activePath}` : ' Set a workspace path in the header to scope execution.'}
+                  {activeBranch ? ` Branch: ${activeBranch}.` : ''}
+                </p>
+              </div>
+            )}
             {messages.map((msg) => {
               const isUser = msg.role === 'user';
 
@@ -295,15 +240,14 @@ export const AgentSamWorkMode: React.FC<AgentSamWorkModeProps> = ({
 
               return (
                 <div key={msg.id} className="flex flex-col items-start w-full space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-150">
-                  {/* Elapsed Execution Badge Accordion */}
-                  {msg.executionTime && (
+                  {msg.taskTrace && (
                     <button
                       type="button"
                       onClick={() => setIsTraceExpanded(!isTraceExpanded)}
                       className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-800/80 hover:bg-zinc-700/80 text-zinc-300 border border-zinc-700/60 text-xs font-mono transition-all"
                     >
                       <Sparkles size={12} className="text-purple-400" />
-                      <span>{msg.executionTime}</span>
+                      <span>{msg.taskTrace.title}</span>
                       <ChevronRight 
                         size={12} 
                         className={cn("text-zinc-400 transition-transform duration-200", isTraceExpanded && "rotate-90")} 
@@ -311,62 +255,16 @@ export const AgentSamWorkMode: React.FC<AgentSamWorkModeProps> = ({
                     </button>
                   )}
 
-                  {/* Expandable Step Trace Logs if toggled */}
-                  {isTraceExpanded && (
-                    <div className="w-full p-3.5 rounded-2xl bg-black/60 border border-zinc-800 font-mono text-xs text-zinc-400 space-y-1 animate-in fade-in duration-150">
-                      <div className="text-[10px] uppercase font-bold text-zinc-500 mb-1">Execution Trace Steps</div>
-                      <div className="text-emerald-400">[OK] git status --porcelain → Working tree clean</div>
-                      <div className="text-emerald-400">[OK] git rev-parse --abbrev-ref HEAD → fix/terminal-operator-policy</div>
-                      <div className="text-emerald-400">[OK] git fetch origin main --quiet → Synchronized</div>
-                      <div className="text-amber-400">[Warning] npm test → 2 assertions failed in dispatch ratchet</div>
+                  {isTraceExpanded && msg.taskTrace?.outputSnippet && (
+                    <div className="w-full p-3.5 rounded-2xl bg-black/60 border border-zinc-800 font-mono text-xs text-zinc-400 whitespace-pre-wrap animate-in fade-in duration-150">
+                      {msg.taskTrace.outputSnippet}
                     </div>
                   )}
 
-                  {/* Main Structured Message Output */}
                   <div className="w-full space-y-4 text-[14px] leading-relaxed text-zinc-200">
-                    <p className="text-zinc-200 leading-normal">
+                    <p className="text-zinc-200 leading-normal whitespace-pre-wrap">
                       {msg.content}
                     </p>
-
-                    {/* Status Section */}
-                    {msg.statusLines && msg.statusLines.length > 0 && (
-                      <div className="space-y-1.5 pt-1">
-                        <div className="font-semibold text-zinc-100 text-sm">Status:</div>
-                        <ul className="space-y-1 pl-1">
-                          {msg.statusLines.map((line, idx) => (
-                            <li key={idx} className="flex items-start gap-2 text-zinc-300 text-xs sm:text-sm">
-                              <span className="text-zinc-500 select-none">•</span>
-                              <span className="font-mono bg-zinc-800/60 px-2 py-0.5 rounded-md border border-zinc-700/40 text-zinc-200">
-                                {line}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-
-                    {/* Validation Section */}
-                    {msg.validationLines && msg.validationLines.length > 0 && (
-                      <div className="space-y-1.5 pt-1">
-                        <div className="font-semibold text-zinc-100 text-sm">Validation:</div>
-                        <div className="space-y-1 pl-1">
-                          {msg.validationLines.map((line, idx) => (
-                            <div key={idx} className="text-xs sm:text-sm font-mono text-zinc-300 flex items-start gap-2">
-                              <span className="text-zinc-500 select-none">•</span>
-                              <span>{line}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Conclusion Paragraph */}
-                    {msg.conclusion && (
-                      <div className="pt-2 text-zinc-300 text-xs sm:text-sm leading-relaxed border-t border-zinc-800/80">
-                        <span className="font-semibold text-zinc-100">Conclusion: </span>
-                        {msg.conclusion}
-                      </div>
-                    )}
                   </div>
 
                   {/* Message Action Footer Bar */}
@@ -392,14 +290,14 @@ export const AgentSamWorkMode: React.FC<AgentSamWorkModeProps> = ({
                       <ThumbsDown size={14} />
                     </button>
                     <button
-                      onClick={() => handleCopy(msg.id, msg.content + (msg.conclusion ? '\n\n' + msg.conclusion : ''))}
+                      onClick={() => handleCopy(msg.id, msg.content)}
                       title="Copy message content"
                       className="p-1.5 rounded-lg hover:bg-zinc-800 hover:text-white transition-colors"
                     >
                       {copiedId === msg.id ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
                     </button>
                     <button
-                      onClick={() => handleComposerSubmit("Please re-run analysis and inspect drift again.")}
+                      onClick={() => handleComposerSubmit(msg.content)}
                       title="Retry / Regenerate"
                       className="p-1.5 rounded-lg hover:bg-zinc-800 hover:text-white transition-colors"
                     >
@@ -495,7 +393,7 @@ export const AgentSamWorkMode: React.FC<AgentSamWorkModeProps> = ({
                     className="w-full min-h-[40px] p-2.5 rounded-xl bg-zinc-800/40 hover:bg-zinc-800/80 border border-zinc-700/40 text-left flex items-center gap-2 text-xs font-mono text-zinc-300 hover:text-purple-300 transition-colors cursor-pointer active:scale-95"
                   >
                     <span className="text-zinc-500">//</span>
-                    <span className="truncate">inneranimalmedia-mcp-server</span>
+                    <span className="truncate">{activePath || 'No workspace path set'}</span>
                   </button>
 
                   <button

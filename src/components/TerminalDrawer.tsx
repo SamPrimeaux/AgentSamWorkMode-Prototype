@@ -43,7 +43,6 @@ interface TerminalDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   onOpen: () => void;
-  onRunTestAgain: () => void;
   activeBranch?: string;
   activePath?: string;
   customLogs?: string[];
@@ -51,13 +50,23 @@ interface TerminalDrawerProps {
   seedCommand?: string | null;
 }
 
+function buildTerminalBanner(activePath: string, activeBranch: string): string[] {
+  const cwd = activePath || '~';
+  return [
+    `# Terminal — connect ExecOS local lane to run commands`,
+    `# Branch: ${activeBranch || 'unknown'}  Path: ${cwd || 'not set'}`,
+    `# Paste a command from the palette or type below once connected`,
+    ``,
+    `${cwd} % `,
+  ];
+}
+
 export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
   isOpen,
   onClose,
   onOpen,
-  onRunTestAgain,
   activeBranch = 'main',
-  activePath = 'backend/agentsam',
+  activePath = '',
   customLogs,
   initialSnapPosition = 'split',
   seedCommand = null,
@@ -77,33 +86,17 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
   const touchStartY = useRef<number | null>(null);
   const touchCurrentY = useRef<number | null>(null);
 
-  const defaultLogs = [
-    `# Connected to Local Mac lane via localpty on port 3099 (Clean PM2 sandbox)`,
-    `> npm test -- auth`,
-    `> node --test test/auth`,
-    ``,
-    `[OK] auth/session.test.ts          2.1s`,
-    `[OK] auth/oauth.test.ts            1.3s`,
-    `[OK] auth/guards.test.ts           1.0s`,
-    `[OK] auth/workspace-access.test.ts 1.6s`,
-    `[OK] auth/middleware.test.ts       0.8s`,
-    ``,
-    `Test Files   5 passed (5)`,
-    `Tests        18 passed (18)`,
-    `Start        9:40:12 AM`,
-    `Duration     4.32s`,
-    ``,
-    `[Done] Done in 4.32s.`,
-    `dev@macbook ${activePath} % `
-  ];
-
-  const [logs, setLogs] = useState<string[]>(customLogs && customLogs.length > 0 ? customLogs : defaultLogs);
+  const [logs, setLogs] = useState<string[]>(
+    customLogs && customLogs.length > 0 ? customLogs : buildTerminalBanner(activePath, activeBranch)
+  );
 
   useEffect(() => {
     if (customLogs && customLogs.length > 0) {
       setLogs(customLogs);
+    } else if (!isOpen) {
+      setLogs(buildTerminalBanner(activePath, activeBranch));
     }
-  }, [customLogs]);
+  }, [customLogs, activePath, activeBranch, isOpen]);
 
   useEffect(() => {
     if (!seedCommand || !isOpen) return;
@@ -185,66 +178,28 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
     const cmd = (customCmd || commandInput).trim();
     if (!cmd) return;
 
+    if (cmd.toLowerCase() === 'clear') {
+      setCommandInput('');
+      handleClear();
+      return;
+    }
+
     setCommandInput('');
     setIsRunning(true);
     setOwnershipState('agent_controlling');
 
     setLogs(prev => [
       ...prev,
-      `dev@macbook ${activePath} % ${cmd}`,
-      `[Agent Sam executing: ${cmd} on ${activeLane}...]`
+      `${activePath || '~'} % ${cmd}`,
+      `[ExecOS not connected] Command queued locally. Connect the local lane (port 3099) to execute.`,
+      `${activePath || '~'} % `
     ]);
-
-    setTimeout(() => {
-      setIsRunning(false);
-      setOwnershipState('idle');
-      const lower = cmd.toLowerCase();
-      if (lower.includes('test') || lower.includes('auth')) {
-        setLogs(prev => [
-          ...prev,
-          `[OK] 5 test suites passed (18 tests total, 0 regressions)`,
-          `[Done] Done in 2.14s.`,
-          `dev@macbook ${activePath} % `
-        ]);
-      } else if (lower.includes('build') || lower.includes('deck') || lower.includes('presentation')) {
-        setLogs(prev => [
-          ...prev,
-          `[OK] Synthesizing pitch deck with Gemini 3.5 Flash...`,
-          `[OK] 4 responsive slide canvases compiled to Work Mode.`,
-          `[Done] Build complete in 1.48s.`,
-          `dev@macbook ${activePath} % `
-        ]);
-      } else if (lower.includes('git') || lower.includes('push') || lower.includes('status')) {
-        setLogs(prev => [
-          ...prev,
-          `On branch ${activeBranch}`,
-          `Your branch is up to date with 'origin/${activeBranch}'.`,
-          `nothing to commit, working tree clean`,
-          `dev@macbook ${activePath} % `
-        ]);
-      } else if (lower === 'clear') {
-        setLogs([`dev@macbook ${activePath} % `]);
-      } else if (lower.includes('deploy')) {
-        setLogs(prev => [
-          ...prev,
-          `[OK] Bundling client assets & server runtime...`,
-          `[OK] Deploying to Cloud Run ingress (Port 3000)...`,
-          `[Done] Live preview synchronized at https://preview.apexdynamics.ai`,
-          `dev@macbook ${activePath} % `
-        ]);
-      } else {
-        setLogs(prev => [
-          ...prev,
-          `Agent Sam executed: ${cmd}`,
-          `Process exited with code 0.`,
-          `dev@macbook ${activePath} % `
-        ]);
-      }
-    }, 850);
+    setIsRunning(false);
+    setOwnershipState('idle');
   };
 
   const handleClear = () => {
-    setLogs([`dev@macbook ${activePath} % `]);
+    setLogs(buildTerminalBanner(activePath, activeBranch));
   };
 
   const handleCopyLogs = () => {
@@ -659,20 +614,6 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
           {snapPosition !== 'peek' && (
             <div className="px-4 sm:px-6 py-2 bg-zinc-900/95 border-t border-zinc-800 flex items-center justify-between text-xs shrink-0">
               <div className="flex items-center gap-2">
-                <button
-                  onClick={onRunTestAgain}
-                  className="px-3 py-1 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 flex items-center gap-1.5 transition-colors font-semibold shadow-xs"
-                >
-                  <RotateCcw size={12} />
-                  <span>Run test suite</span>
-                </button>
-                <button
-                  onClick={() => setIsRunning(false)}
-                  className="px-3 py-1 rounded-xl bg-zinc-800/60 hover:bg-zinc-700 text-red-400 flex items-center gap-1.5 transition-colors font-medium"
-                >
-                  <Square size={10} className="fill-red-400" />
-                  <span>Stop</span>
-                </button>
                 <button
                   onClick={handleClear}
                   className="px-3 py-1 rounded-xl bg-zinc-800/60 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 flex items-center gap-1.5 transition-colors font-medium"

@@ -83,68 +83,29 @@ module.exports = {
   };
 
   const handleSanitizeAndRestart = () => {
-    setIsApplyingSanitizer(true);
-    setTestLogs([`[PM2 Sanitizer] Writing ${status.defaultCwd}/ecosystem.config.cjs...`]);
-
-    setTimeout(() => {
-      setTestLogs((prev) => [
-        ...prev,
-        '[OK] Stripped 106 IDE/Cursor bleed variables (VSCODE_PROCESS_TITLE, CURSOR_AGENT, CURSOR_CONVERSATION_ID)',
-        '[OK] File permissions tightened: chmod 600 ~/.pm2/dump.pm2 (Owner-only read/write)'
-      ]);
-    }, 400);
-
-    setTimeout(() => {
-      setTestLogs((prev) => [
-        ...prev,
-        '[OK] Running: pm2 delete execos && pm2 start ecosystem.config.cjs --env production && pm2 save',
-        '[OK] ExecOS daemon online on Port 3099 (PID: 42890)'
-      ]);
-    }, 900);
-
-    setTimeout(() => {
-      setIsApplyingSanitizer(false);
-      onUpdateStatus({
-        ...status,
-        isEcosystemSanitized: true,
-        cursorBleedDetected: false,
-        totalInheritedEnvVars: status.sanitizedEnvVars.length
-      });
-      confetti({ particleCount: 35, spread: 60 });
-    }, 1400);
+    setTestLogs([
+      '[ExecOS not connected] Connect the local lane on port 3099 to run PM2 sanitizer and restart.',
+    ]);
   };
 
   const handleRunCommand = () => {
     if (!commandInput.trim()) return;
     setIsExecutingCmd(true);
-
-    setTimeout(() => {
-      setIsExecutingCmd(false);
-      const newCmdResult = {
-        id: `cmd-${Date.now()}`,
-        command: commandInput,
-        cwd: status.defaultCwd,
-        exitCode: 0,
-        durationMs: Math.floor(Math.random() * 25) + 12,
-        timestamp: 'Just now',
-        output: commandInput.includes('pm2 env')
-          ? status.isEcosystemSanitized
-            ? `NODE_ENV: production\nPORT: 3099\nEXECOS_DEFAULT_CWD: ${status.defaultCwd}\n[Sanitized: 11 clean keys, zero IDE bleed]`
-            : 'VSCODE_PROCESS_TITLE: extension-host (agent-exec)\nCURSOR_AGENT: 1\nCURSOR_CONVERSATION_ID: conv_99d12a\n[Warning: 114 inherited environment variables]'
-          : commandInput.includes('git')
-          ? 'On branch fix/pwa-sw-caching\nYour branch is up to date with origin/main.\nChanges not staged for commit:\n  modified:   src/bootstrap.ts'
-          : `Execution complete. Executed in ${status.defaultCwd} via tunnel (0 DO hops).`
-      };
-
-      onUpdateStatus({
-        ...status,
-        recentLocalCommands: [newCmdResult, ...status.recentLocalCommands]
-      });
-
-      if (onRunRemoteCommand) {
-        onRunRemoteCommand(commandInput);
-      }
-    }, 500);
+    setIsExecutingCmd(false);
+    const newCmdResult = {
+      id: `cmd-${Date.now()}`,
+      command: commandInput,
+      cwd: status.defaultCwd,
+      exitCode: 1,
+      durationMs: 0,
+      timestamp: 'Just now',
+      output: '[ExecOS not connected] Command not executed. Connect local lane to run remote commands.',
+    };
+    onUpdateStatus({
+      ...status,
+      recentLocalCommands: [newCmdResult, ...status.recentLocalCommands].slice(0, 20),
+    });
+    if (onRunRemoteCommand) onRunRemoteCommand(commandInput);
   };
 
   const handleLaneChange = (newLane: ExecutionLane) => {

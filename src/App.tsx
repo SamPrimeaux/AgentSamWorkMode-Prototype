@@ -11,14 +11,14 @@ import {
   BrandKitData, 
   CollaboratorAgent 
 } from './types';
-import { 
-  getDynamicMessages, 
-  getDynamicPresentation, 
-  getDynamicClientWebsite, 
-  getDynamicDashboardMetrics, 
-  getDynamicBrandKit, 
-  getDynamicCollaborators 
-} from './data/mockWorkspace';
+import {
+  createEmptyBrandKit,
+  createEmptyCollaborators,
+  createEmptyMessages,
+  createEmptyMetrics,
+  createEmptyPresentation,
+  createEmptyWebsite,
+} from './lib/emptyState';
 import { executeAgentSamTask } from './services/agentEngine';
 
 // Configuration and Navigation Architecture
@@ -77,13 +77,13 @@ function AppInner() {
     setConfigPath(newPath);
   };
 
-  // Workspace Data State (Initialized dynamically from environment config)
-  const [messages, setMessages] = useState<ChatMessageItem[]>(() => getDynamicMessages(config));
-  const [deck, setDeck] = useState<PresentationDeck>(() => getDynamicPresentation(config));
-  const [website, setWebsite] = useState<ClientWebsiteData>(() => getDynamicClientWebsite(config));
-  const [metrics, setMetrics] = useState<DashboardMetric[]>(() => getDynamicDashboardMetrics(config));
-  const [brandKit, setBrandKit] = useState<BrandKitData>(() => getDynamicBrandKit(config));
-  const [collaborators, setCollaborators] = useState<CollaboratorAgent[]>(() => getDynamicCollaborators(config));
+  // Workspace Data State — empty until user or API populates
+  const [messages, setMessages] = useState<ChatMessageItem[]>(() => createEmptyMessages());
+  const [deck, setDeck] = useState<PresentationDeck>(() => createEmptyPresentation(config));
+  const [website, setWebsite] = useState<ClientWebsiteData>(() => createEmptyWebsite(config));
+  const [metrics, setMetrics] = useState<DashboardMetric[]>(() => createEmptyMetrics());
+  const [brandKit, setBrandKit] = useState<BrandKitData>(() => createEmptyBrandKit(config));
+  const [collaborators, setCollaborators] = useState<CollaboratorAgent[]>(() => createEmptyCollaborators());
   const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
   const [telemetryLogs, setTelemetryLogs] = useState<any[]>([]);
 
@@ -120,45 +120,8 @@ function AppInner() {
     setIsProcessing(true);
 
     try {
-      const result = await executeAgentSamTask(text, model, {
-        currentSlides: deck.slides,
-        currentWebsite: website,
-        activeBranch
-      });
+      const result = await executeAgentSamTask(text, model);
 
-      // Update workspace artifacts if generated
-      if (result.newSlides) {
-        setDeck((prev) => ({
-          ...prev,
-          slides: [...prev.slides, ...result.newSlides!]
-        }));
-      }
-
-      if (result.websiteUpdates) {
-        setWebsite((prev) => ({
-          ...prev,
-          ...result.websiteUpdates
-        }));
-      }
-
-      if (result.newImage) {
-        setBrandKit((prev) => ({
-          ...prev,
-          generatedImages: [result.newImage!, ...prev.generatedImages]
-        }));
-      }
-
-      if (result.newVideo) {
-        setBrandKit((prev) => ({
-          ...prev,
-          generatedVideos: [result.newVideo!, ...prev.generatedVideos]
-        }));
-      }
-
-      if (result.terminalLogs && result.terminalLogs.length > 0) {
-        setTerminalLogs(result.terminalLogs);
-      }
-      
       if (result.telemetry) {
         setTelemetryLogs((prev) => [...prev, result.telemetry!]);
       }
@@ -171,7 +134,6 @@ function AppInner() {
         authorAvatarBg: 'bg-zinc-900 dark:bg-emerald-600 text-white',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         content: result.text,
-        taskTrace: result.trace,
         reactions: ['thumbs-up', 'smile', 'clipboard']
       };
 
@@ -184,7 +146,7 @@ function AppInner() {
         authorInitials: config.agentInitials,
         authorAvatarBg: 'bg-zinc-900 dark:bg-emerald-600 text-white',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        content: `Encountered an execution exception: ${err?.message || 'Unknown error'}. Retrying with local test suite sandbox.`
+        content: `Execution failed: ${err?.message || 'Unknown error'}.`
       };
       setMessages((prev) => [...prev, errorMsg]);
     } finally {
@@ -198,10 +160,6 @@ function AppInner() {
   };
 
   useCommandPaletteShortcut(() => setCommandPaletteOpen(true));
-
-  const handleRunTestAgain = () => {
-    handleSendMessage('npm test -- auth', selectedModel);
-  };
 
   return (
     <div className={cn(
@@ -325,6 +283,10 @@ function AppInner() {
                     onPresentDeck={() => setIsPresentationOpen(true)}
                     onOpenTerminal={() => setIsTerminalOpen(true)}
                     onDispatchAgentMessage={(msg) => handleSendMessage(msg, selectedModel)}
+                    chatMessages={messages}
+                    isAgentProcessing={isProcessing}
+                    activePath={activePath}
+                    activeBranch={activeBranch}
                   />
                 </section>
               </div>
@@ -361,6 +323,10 @@ function AppInner() {
                     onPresentDeck={() => setIsPresentationOpen(true)}
                     onOpenTerminal={() => setIsTerminalOpen(true)}
                     onDispatchAgentMessage={(msg) => handleSendMessage(msg, selectedModel)}
+                    chatMessages={messages}
+                    isAgentProcessing={isProcessing}
+                    activePath={activePath}
+                    activeBranch={activeBranch}
                   />
                 )}
               </div>
@@ -374,7 +340,6 @@ function AppInner() {
         isOpen={isTerminalOpen}
         onClose={() => setIsTerminalOpen(false)}
         onOpen={() => setIsTerminalOpen(true)}
-        onRunTestAgain={handleRunTestAgain}
         activeBranch={activeBranch}
         activePath={activePath}
         customLogs={terminalLogs}

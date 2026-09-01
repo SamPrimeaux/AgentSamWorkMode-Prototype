@@ -83,11 +83,11 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
 
   const studioViews: { id: WorkSubTab; label: string; icon: any; badge?: string; desc: string }[] = [
     { id: 'workbench', label: 'Agent Workbench', icon: Terminal, badge: 'Core', desc: 'Inbox, Workspaces, PRs & ExecOS Lane' },
-    { id: 'presentations', label: 'Presentations Deck', icon: FileText, badge: '4 Slides', desc: 'Autonomous Client Pitch Deck' },
+    { id: 'presentations', label: 'Presentations Deck', icon: FileText, desc: 'Client pitch decks' },
     { id: 'websites', label: 'Websites & CMS', icon: Layout, desc: 'Live Edge Sandbox & CMS Editor' },
     { id: 'dashboards', label: 'Telemetry Dashboards', icon: BarChart3, desc: 'Real-time agent metrics & pipeline' },
     { id: 'brand', label: 'Brand Studio', icon: Palette, badge: 'AI', desc: '1K Renders & Veo Motion Video' },
-    { id: 'team', label: 'Live Collaboration', icon: Users, badge: '4 Swarms', desc: 'Multi-Agent Autonomous Team' },
+    { id: 'team', label: 'Live Collaboration', icon: Users, desc: 'Multi-agent team coordination' },
   ];
 
   const quickPresets = [

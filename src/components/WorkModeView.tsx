@@ -38,8 +38,7 @@ import {
   BrandKitData, 
   CollaboratorAgent,
   SlideItem,
-  GeneratedImageItem,
-  GeneratedVideoItem
+  ChatMessageItem,
 } from '../types';
 import { cn } from '../lib/utils';
 import confetti from 'canvas-confetti';
@@ -65,6 +64,10 @@ interface WorkModeViewProps {
   onPresentDeck: () => void;
   onOpenTerminal: () => void;
   onDispatchAgentMessage?: (message: string) => void;
+  chatMessages?: ChatMessageItem[];
+  isAgentProcessing?: boolean;
+  activePath?: string;
+  activeBranch?: string;
 }
 
 export const WorkModeView: React.FC<WorkModeViewProps> = ({
@@ -81,7 +84,11 @@ export const WorkModeView: React.FC<WorkModeViewProps> = ({
   telemetryLogs,
   onPresentDeck,
   onOpenTerminal,
-  onDispatchAgentMessage
+  onDispatchAgentMessage,
+  chatMessages = [],
+  isAgentProcessing = false,
+  activePath = '',
+  activeBranch = 'main',
 }) => {
   const [internalSubTab, setInternalSubTab] = useState<WorkSubTab>('workbench');
   const subTab = externalSubTab !== undefined ? externalSubTab : internalSubTab;
@@ -99,7 +106,7 @@ export const WorkModeView: React.FC<WorkModeViewProps> = ({
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
-  const currentSlide = deck.slides[currentSlideIndex] || deck.slides[0];
+  const currentSlide = deck.slides[currentSlideIndex];
 
   // Handle slide edit
   const handleUpdateCurrentSlide = (field: keyof SlideItem, value: any) => {
@@ -114,18 +121,11 @@ export const WorkModeView: React.FC<WorkModeViewProps> = ({
   const handleAddSlide = () => {
     const newSlide: SlideItem = {
       id: 'slide-' + Date.now(),
-      badge: 'Strategic Deliverable',
-      title: 'New Client Milestones & Execution',
-      subtitle: 'Generated via Agent Sam autonomous collaborative planner.',
-      bullets: [
-        'High-velocity marketing asset synthesis reducing creative latency',
-        'Enterprise data compliance with sandboxed execution runtime',
-        'Full multi-channel distribution across mobile, web, and presentation deck'
-      ],
-      metrics: [
-        { label: 'Asset Velocity', value: '<5s', trend: 'Instant' },
-        { label: 'Client Approval', value: '99%', trend: 'Target' }
-      ],
+      badge: 'New slide',
+      title: 'Untitled slide',
+      subtitle: '',
+      bullets: [],
+      metrics: [],
       accentColor: '#2563eb'
     };
     onUpdateDeck({ ...deck, slides: [...deck.slides, newSlide] });
@@ -142,53 +142,15 @@ export const WorkModeView: React.FC<WorkModeViewProps> = ({
   };
 
   const handleGenerateImage = () => {
-    if (!imagePrompt.trim()) return;
-    setIsGeneratingImage(true);
-    setTimeout(() => {
-      const newImg: GeneratedImageItem = {
-        id: 'img-' + Date.now(),
-        prompt: imagePrompt.trim(),
-        imageUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80',
-        model: 'gemini-3.1-flash-image-preview',
-        aspectRatio: '16:9',
-        timestamp: 'Just now',
-        tags: ['Client Asset', '1K Render', 'Gemini Flash']
-      };
-      onUpdateBrandKit({
-        ...brandKit,
-        generatedImages: [newImg, ...brandKit.generatedImages]
-      });
-      setIsGeneratingImage(false);
-      setImagePrompt('');
-      confetti({ particleCount: 40, spread: 60 });
-    }, 1200);
+    if (!imagePrompt.trim() || !onDispatchAgentMessage) return;
+    onDispatchAgentMessage(`Generate a brand image: ${imagePrompt.trim()}`);
+    setImagePrompt('');
   };
 
   const handleGenerateVideo = () => {
-    if (!videoPrompt.trim()) return;
-    setIsGeneratingVideo(true);
-    setTimeout(() => {
-      const newVid: GeneratedVideoItem = {
-        id: 'vid-' + Date.now(),
-        prompt: videoPrompt.trim(),
-        posterUrl: 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=800&auto=format&fit=crop&q=80',
-        videoUrl: videoAspect === '16:9'
-          ? 'https://assets.mixkit.co/videos/preview/mixkit-digital-animation-of-screens-with-charts-31911-large.mp4'
-          : 'https://assets.mixkit.co/videos/preview/mixkit-vertical-animation-of-blue-and-purple-lights-41372-large.mp4',
-        aspectRatio: videoAspect,
-        duration: '0:08',
-        status: 'ready',
-        model: 'veo-3.1-fast-generate-preview',
-        timestamp: 'Just now'
-      };
-      onUpdateBrandKit({
-        ...brandKit,
-        generatedVideos: [newVid, ...brandKit.generatedVideos]
-      });
-      setIsGeneratingVideo(false);
-      setVideoPrompt('');
-      confetti({ particleCount: 50, spread: 70 });
-    }, 1500);
+    if (!videoPrompt.trim() || !onDispatchAgentMessage) return;
+    onDispatchAgentMessage(`Generate a brand video (${videoAspect}): ${videoPrompt.trim()}`);
+    setVideoPrompt('');
   };
 
   return (
@@ -228,6 +190,10 @@ export const WorkModeView: React.FC<WorkModeViewProps> = ({
           <AgentSamWorkMode
             onDispatchAgentMessage={onDispatchAgentMessage || (() => {})}
             onOpenTerminal={onOpenTerminal}
+            messages={chatMessages}
+            isProcessing={isAgentProcessing}
+            activePath={activePath}
+            activeBranch={activeBranch}
           />
         </div>
       ) : (
@@ -268,6 +234,18 @@ export const WorkModeView: React.FC<WorkModeViewProps> = ({
             </div>
 
             {/* Slide Viewer Canvas Card */}
+            {!currentSlide ? (
+              <div className="w-full aspect-[16/10] sm:aspect-[16/9] rounded-3xl bg-white dark:bg-zinc-900 border border-dashed border-zinc-300 dark:border-zinc-700 flex flex-col items-center justify-center p-8 text-center">
+                <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">No slides yet</p>
+                <p className="text-xs text-zinc-500 mb-4">Ask Agent Sam to create a presentation, or add a slide manually.</p>
+                <button
+                  onClick={handleAddSlide}
+                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold"
+                >
+                  Add first slide
+                </button>
+              </div>
+            ) : (
             <div className="w-full aspect-[16/10] sm:aspect-[16/9] rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-md p-6 sm:p-8 flex flex-col justify-between relative overflow-hidden transition-all">
               {/* Subtle top accent bar */}
               <div 
@@ -333,8 +311,9 @@ export const WorkModeView: React.FC<WorkModeViewProps> = ({
                 </div>
               )}
             </div>
+            )}
 
-            {/* Slide Thumbnails & Carousel Controls */}
+            {deck.slides.length > 0 && (
             <div className="flex items-center justify-between gap-2 pt-1">
               <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar flex-1 py-1">
                 {deck.slides.map((s, idx) => (
@@ -380,8 +359,9 @@ export const WorkModeView: React.FC<WorkModeViewProps> = ({
                 </button>
               </div>
             </div>
+            )}
 
-            {/* Slide Quick Editor */}
+            {currentSlide && (
             <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
@@ -419,6 +399,7 @@ export const WorkModeView: React.FC<WorkModeViewProps> = ({
                 </div>
               </div>
             </div>
+            )}
           </div>
         )}
 
@@ -526,9 +507,16 @@ export const WorkModeView: React.FC<WorkModeViewProps> = ({
           <div className="max-w-4xl mx-auto space-y-4">
             <div>
               <h2 className="text-base font-bold text-zinc-900 dark:text-zinc-100">Executive Operations & Telemetry</h2>
-              <p className="text-xs text-zinc-500">Live ROI, Conversion funnels, and Agent Sam execution metrics</p>
+              <p className="text-xs text-zinc-500">Metrics populate from live telemetry and connected data sources</p>
             </div>
 
+            {metrics.length === 0 ? (
+              <div className="p-10 rounded-3xl bg-white dark:bg-zinc-900 border border-dashed border-zinc-300 dark:border-zinc-700 text-center">
+                <p className="text-sm text-zinc-600 dark:text-zinc-400">No dashboard metrics yet.</p>
+                <p className="text-xs text-zinc-500 mt-1">Connect analytics or ask Agent Sam to pull KPIs from your workspace.</p>
+              </div>
+            ) : (
+            <>
             {/* Top KPI Metric Cards */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {metrics.map((m) => (
@@ -544,45 +532,8 @@ export const WorkModeView: React.FC<WorkModeViewProps> = ({
               ))}
             </div>
 
-            {/* Live Visual Chart Box */}
-            <div className="p-5 rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="font-bold text-sm text-zinc-900 dark:text-zinc-100">Revenue & Lead Conversion Trajectory</h3>
-                  <p className="text-xs text-zinc-400">Quarterly growth trajectory with autonomous agent pipeline</p>
-                </div>
-                <div className="flex items-center gap-1.5 text-xs bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl">
-                  <span className="px-2.5 py-0.5 rounded-lg bg-white dark:bg-zinc-900 font-semibold shadow-xs">Q4 2026</span>
-                  <span className="px-2 py-0.5 text-zinc-400">YTD</span>
-                </div>
-              </div>
-
-              {/* Simulated Chart Bars */}
-              <div className="h-44 flex items-end justify-between gap-2 pt-4 px-2">
-                {[
-                  { month: 'Oct W1', rev: 45, agents: 12 },
-                  { month: 'Oct W3', rev: 58, agents: 18 },
-                  { month: 'Nov W1', rev: 68, agents: 24 },
-                  { month: 'Nov W3', rev: 78, agents: 32 },
-                  { month: 'Dec W1', rev: 92, agents: 45 },
-                  { month: 'Dec W3', rev: 110, agents: 60 },
-                  { month: 'Jan Live', rev: 138, agents: 84 },
-                ].map((col, idx) => (
-                  <div key={idx} className="flex-1 flex flex-col items-center gap-2 h-full justify-end group">
-                    <div className="text-[10px] font-mono text-zinc-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                      ${col.rev}k
-                    </div>
-                    <div 
-                      className="w-full max-w-[36px] bg-gradient-to-t from-blue-600 to-emerald-400 rounded-t-xl group-hover:brightness-110 transition-all shadow-sm"
-                      style={{ height: `${(col.rev / 140) * 100}%` }}
-                    />
-                    <div className="text-[10px] font-medium text-zinc-400 text-center truncate w-full">
-                      {col.month}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            </>
+            )}
           </div>
         )}
 

@@ -284,34 +284,8 @@ export const WorkbenchInboxView: React.FC<WorkbenchInboxViewProps> = ({
             Recent Agent Executions
           </div>
 
-          <div className="p-4 rounded-3xl bg-white/[0.02] border border-white/[0.06] space-y-3">
-            <div className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
-                <CheckCircle2 size={15} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-xs font-medium text-white">
-                  PWA SW Cache Invalidation Strategy verified
-                </div>
-                <div className="text-[11px] text-white/40 mt-0.5">
-                  Applied Workbox CacheFirst rules to `/static/dashboard/app/*.js` • 12m ago
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-3 pt-2 border-t border-white/[0.04]">
-              <div className="w-8 h-8 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center shrink-0 mt-0.5">
-                <Zap size={15} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-xs font-medium text-white">
-                  Non-blocking dashboard bootstrap decoupled from React mount
-                </div>
-                <div className="text-[11px] text-white/40 mt-0.5">
-                  App shell boots instantly; session verification moved to idle callback • 35m ago
-                </div>
-              </div>
-            </div>
+          <div className="p-4 rounded-3xl bg-white/[0.02] border border-dashed border-white/[0.08] text-center text-xs text-white/40">
+            No recent executions. Activity appears here when Agent Sam runs commands on a connected lane.
           </div>
         </div>
       </div>
