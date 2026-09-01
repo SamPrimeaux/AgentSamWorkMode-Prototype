@@ -41,7 +41,7 @@ export const AgentComputerSurface: React.FC<AgentComputerSurfaceProps> = ({
   className
 }) => {
   const [activeTab, setActiveTab] = useState<AgentComputerTab>(initialState?.activeTab || 'browser');
-  const [activeLane, setActiveLane] = useState<ExecutionLane>(initialState?.activeLane || 'local_mac');
+  const [activeLane, setActiveLane] = useState<ExecutionLane>(initialState?.activeLane || 'local_exc');
   const [activeFileId, setActiveFileId] = useState('f-1');
 
   // MCP Tool Testing State
@@ -193,14 +193,14 @@ export const AgentComputerSurface: React.FC<AgentComputerSurfaceProps> = ({
         <div className="flex items-center gap-1.5 p-1 rounded-xl bg-zinc-950 border border-zinc-800 text-xs font-mono">
           <button
             type="button"
-            onClick={() => setActiveLane('local_mac')}
+            onClick={() => setActiveLane('local_exc')}
             className={cn(
               "px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1.5",
-              activeLane === 'local_mac' ? "bg-zinc-800 text-white font-semibold shadow-xs" : "text-zinc-400 hover:text-zinc-200"
+              activeLane === 'local_exc' ? "bg-zinc-800 text-white font-semibold shadow-xs" : "text-zinc-400 hover:text-zinc-200"
             )}
           >
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            <span>Local Mac :3099</span>
+            <span>Local exec :3099</span>
           </button>
           <button
             type="button"

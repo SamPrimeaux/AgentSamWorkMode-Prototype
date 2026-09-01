@@ -66,7 +66,17 @@ export interface PwaCacheStatus {
   cacheSizeKb: number;
 }
 
-export type ExecutionLane = 'local_mac' | 'gcp_vm' | 'cloud_sandbox';
+export type ExecutionLane = 'local_exc' | 'gcp_vm' | 'cloud_sandbox';
+
+/** Default lane for shell/commands on the user's own machine (any OS). */
+export const DEFAULT_LOCAL_EXECUTION_LANE: ExecutionLane = 'local_exc';
+
+/** @deprecated Renamed to local_exc — normalize persisted values when reading. */
+export function normalizeExecutionLane(lane: string | undefined | null): ExecutionLane {
+  if (lane === 'local_mac' || lane === 'local_exc') return 'local_exc';
+  if (lane === 'gcp_vm' || lane === 'cloud_sandbox') return lane;
+  return DEFAULT_LOCAL_EXECUTION_LANE;
+}
 
 export interface ExecOsEnvironmentVariable {
   key: string;

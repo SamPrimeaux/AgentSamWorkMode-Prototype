@@ -28,7 +28,7 @@ export const RUNTIME_TARGET_OPTIONS: RuntimeTargetOption[] = [
     id: 'docker_local',
     label: 'Docker (local)',
     sublabel: 'Runs on your Mac or GCP VM — no metered hosting',
-    execLane: 'local_mac',
+    execLane: 'local_exc',
     status: 'available',
   },
   {

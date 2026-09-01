@@ -26,7 +26,7 @@ const LANES: {
   icon: React.ElementType;
 }[] = [
   {
-    id: 'local_mac',
+    id: 'local_exc',
     apiTarget: 'user_hosted_tunnel',
     label: 'Your machine',
     sublabel: 'user_hosted_tunnel · localhost / Docker / CF tunnel',
