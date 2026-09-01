@@ -98,7 +98,7 @@ export function useGitBridge(input?: string | null | GitBridgeContext) {
       const suffix = q.toString();
       const path = `/api/agent/git/status${suffix ? `?${suffix}` : ''}`;
       const res = await apiFetch<GitStatusPayload>(path);
-      if (!res.ok) {
+      if ('error' in res) {
         setLive(false);
         if (res.error.status === 401) setAuthRequired(true);
         return;
