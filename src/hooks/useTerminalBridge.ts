@@ -122,7 +122,7 @@ export function useTerminalBridge(options?: TerminalBridgeOptions) {
     const res = await apiFetch<TerminalConfigStatus>(
       `/api/agent/terminal/config-status${suffix ? `?${suffix}` : ''}`,
     );
-    if (!res.ok) {
+    if ('error' in res) {
       setState((s) => ({
         ...s,
         config: null,
