@@ -328,6 +328,8 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
                   <span>{isDeploying ? 'Deploying to Global Edge CDN...' : 'Trigger Instant Redeployment'}</span>
                 </button>
               </div>
+                </>
+              )}
             </div>
           )}
 
