@@ -41,6 +41,7 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
   const [copiedUrl, setCopiedUrl] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'deploy' | 'export' | 'domain'>('deploy');
   const [customDomainInput, setCustomDomainInput] = useState(website.deployment?.customDomain || '');
+  const [runtimeTarget, setRuntimeTarget] = useState<RuntimeTarget>('cloudflare_workers');
 
   const liveUrl = website.deployment?.deployedUrl || '';
 
