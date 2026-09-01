@@ -6,6 +6,7 @@ Includes:
 - Work Mode UI (`app/workmode/`)
 - SDK CLI pin from GitHub + verb delegation
 - MCP bridge manifest + `dist/mcp-bridge/manifest.json` build export
+- **GitHub CLI (gh)** first-class Cmd+K catalog + `agentsam_gh_*` agent tools (`patches/0004-*.patch`)
 
 ## Push to AgentSamRemix remote (requires write access)
 
@@ -25,8 +26,22 @@ git push -u origin cursor/integrate-workmode-ui-8edb
 Or apply the patch files in `patches/` sequentially:
 
 ```bash
-git am patches/0001-*.patch patches/0002-*.patch patches/0003-*.patch
+git am patches/0001-*.patch patches/0002-*.patch patches/0003-*.patch patches/0004-*.patch
 ```
+
+## GitHub CLI (gh) — apply + D1 seed
+
+After applying patch `0004-feat-gh-cli-first-class-cmdk-and-agent-tools.patch`:
+
+```bash
+npm run test:gh
+# Apply D1 migration (inneranimalmedia-business):
+wrangler d1 execute inneranimalmedia-business --remote --file=migrations/1325_seed_gh_cli_commands_and_tools.sql
+```
+
+Cmd+K: type `>` or `/` and search `gh pr`, `gh run`, etc. Agent tools: `agentsam_gh_pr_list`, `agentsam_gh_run`, …
+
+Terminal guide: `GET /api/terminal/gh-guide?lane=sandbox&status=1`
 
 ## MCP server wiring (inneranimalmedia-mcp-server)
 
