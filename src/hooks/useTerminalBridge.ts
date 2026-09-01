@@ -36,6 +36,8 @@ export type TerminalBridgeState = {
   localConnectionActive: boolean;
 };
 
+export type TerminalTargetInput = TerminalLaneTarget | 'local' | 'vm';
+
 export type TerminalBridgeOptions = {
   /** Exact registered runtime connection when one has already been selected. */
   connectionId?: string | null;
@@ -46,9 +48,16 @@ export type TerminalBridgeOptions = {
    * but it must never determine connection identity or execution authority.
    */
   workspaceId?: string | null;
-  targetType?: TerminalLaneTarget;
+  /** UI/domain aliases local|vm are normalized at the transport boundary. */
+  targetType?: TerminalTargetInput;
   onOutputLine?: (line: string) => void;
 };
+
+function normalizeTargetType(target?: TerminalTargetInput | null): TerminalLaneTarget {
+  if (target === 'local') return 'user_hosted_tunnel';
+  if (target === 'vm') return 'platform_vm';
+  return target || DEFAULT_TERMINAL_LANE;
+}
 
 function appendRuntimeContext(
   params: URLSearchParams,
