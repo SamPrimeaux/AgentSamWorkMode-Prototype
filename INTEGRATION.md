@@ -1,46 +1,52 @@
 # AgentSamRemix Integration
 
-Work Mode has been integrated into **AgentSamRemix** on branch
-`cursor/integrate-workmode-ui-8edb`.
+Full integration branch: **`cursor/integrate-workmode-ui-8edb`**
 
-## Apply to AgentSamRemix
+Includes:
+- Work Mode UI (`app/workmode/`)
+- SDK CLI pin from GitHub + verb delegation
+- MCP bridge manifest + `dist/mcp-bridge/manifest.json` build export
+
+## Push to AgentSamRemix remote (requires write access)
+
+The cloud agent cannot push to `SamPrimeaux/AgentSamRemix` (403). From your machine:
 
 ```bash
+git clone https://github.com/SamPrimeaux/AgentSamRemix.git
 cd AgentSamRemix
-git fetch origin
+curl -fsSL -o /tmp/integration.patch \
+  https://raw.githubusercontent.com/SamPrimeaux/AgentSamWorkMode-Prototype/cursor/remix-integration-guide-8edb/patches/agentsamremix-full-integration.patch
 git checkout -b cursor/integrate-workmode-ui-8edb
-git am /path/to/0001-feat-workmode-integrate-AgentSamWorkMode-prototype-U.patch
-npm install
-npm run dev
-# → Create → Work Mode  or  /dashboard/workmode
+git am /tmp/integration.patch
+npm ci && npm run verify:mcp-bridge && npm run build
+git push -u origin cursor/integrate-workmode-ui-8edb
 ```
 
-A copy of the patch lives in this repo at `patches/remix-workmode-integration.patch`.
+Or apply the patch files in `patches/` sequentially:
 
-## What landed in Remix
+```bash
+git am patches/0001-*.patch patches/0002-*.patch patches/0003-*.patch
+```
 
-| Path | Purpose |
-|------|---------|
-| `app/workmode/WorkModePage.tsx` | Route entry — chat + work split layout |
-| `app/workmode/components/` | Ported prototype UI |
-| `app/workmode/hooks/useWorkModeGitBridge.ts` | Live git status |
-| `app/workmode/hooks/useWorkModeTelemetryBridge.ts` | Telemetry poll |
-| `app/workmode/hooks/useWorkModeShellBridge.ts` | Shell PTY via `IAM_TERMINAL_CONNECT` |
+## MCP server wiring (inneranimalmedia-mcp-server)
 
-## Real vs mock
+After build:
 
-| Surface | Status |
-|---------|--------|
-| Git branch + changed files | Live when authenticated |
-| Telemetry tab | Local runs + `/api/agent/telemetry` |
-| Terminal | Opens shell PTY; drawer shows agent logs |
-| Chat / presentations / brand | Prototype engine (next: `/api/agent/chat` SSE) |
+```bash
+npm run build
+# → dist/mcp-bridge/manifest.json
+```
 
-## Next wiring targets
+Import that manifest in **inneranimalmedia-mcp-server** to align schema twins and server URL
+(`https://mcp.inneranimalmedia.com/mcp`).
 
-1. Route chat through `/api/agent/chat` (shell AgentSamChatHost)
-2. PR review → GitHub API + `ApprovalUnifiedDiff`
-3. Browser cards → `@iam/frontend/workbench/browser`
-4. Presentations/websites → CMS + moviemode APIs
+See `docs/platform/mcp-server-wiring.md` in AgentSamRemix after applying the patch.
 
-See `app/workmode/README.md` in AgentSamRemix after applying the patch.
+## Verify locally
+
+```bash
+npm run verify:sdk-cli
+npm run verify:mcp-bridge
+npm run test:bin-lib
+npm run build
+```
