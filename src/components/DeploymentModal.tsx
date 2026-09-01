@@ -19,6 +19,9 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import confetti from 'canvas-confetti';
+import { RuntimeTargetPicker } from './workbench/RuntimeTargetPicker';
+import { RuntimeTarget } from '../types.runtime-target';
+import { DockerDeployPanel } from './workbench/DockerDeployPanel';
 
 interface DeploymentModalProps {
   isOpen: boolean;
