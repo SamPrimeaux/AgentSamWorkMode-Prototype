@@ -1,0 +1,38 @@
+---
+description: AgentSam Work Mode prototype — stack, scripts, and integration boundaries.
+alwaysApply: true
+---
+
+# Work Mode prototype
+
+Standalone Vite + React UI for AgentSam Work Mode. Production wiring targets **AgentSamRemix** (see `INTEGRATION.md`, `docs/AUTH_EXECOS_WIRING.md`).
+
+## Stack
+
+- **Frontend**: React 19, Vite 6, Tailwind 4, TypeScript
+- **Local API**: `server.ts` (Express) — proxies platform APIs when `VITE_IAM_ORIGIN` is set
+- **Deploy**: Cloudflare Workers static assets via `wrangler.jsonc`
+
+## Key scripts
+
+| Script | Purpose |
+|--------|---------|
+| `npm run dev` | Vite + Express full stack |
+| `npm run build:static` | Production UI → `dist/` |
+| `npm run preview:worker` | Build + `wrangler dev` |
+| `npm run deploy` | Build + `wrangler deploy` |
+| `npm run lint` | Typecheck (`tsc --noEmit`) |
+
+## Important paths
+
+- `wrangler.jsonc` — Worker name and assets config
+- `src/lib/wranglerCommandCatalog.ts` — Cmd+K Wrangler command catalog
+- `src/components/shell/CfUnifiedCommandPalette.tsx` — Cloudflare command palette UI
+- `patches/` — Integration patches for AgentSamRemix (0001–0005)
+- `.env.example` — `VITE_IAM_ORIGIN`, `VITE_WORKSPACE_ID`, storage backend
+
+## Conventions
+
+- Minimize scope; match existing patterns in surrounding files.
+- Do not add unrelated refactors when fixing a targeted issue.
+- Patches in `patches/` are applied to AgentSamRemix separately — keep catalog/command changes in sync when touching Wrangler or gh CLI surfaces.

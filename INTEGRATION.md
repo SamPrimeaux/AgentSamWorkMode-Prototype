@@ -1,5 +1,18 @@
 # AgentSamRemix Integration
 
+## Cursor + Cloudflare agent setup
+
+This repo ships the official [Cursor + Cloudflare](https://developers.cloudflare.com/agent-setup/cursor/) configuration:
+
+- **`.cursor/mcp.json`** — Cloudflare MCP servers (API, docs, bindings, builds, observability)
+- **`.cursor/rules/`** — Project and platform rules for Cursor agents
+- **`AGENTS.md`** — Quick reference for agents and Cloud Agents
+- **`docs/CURSOR_CLOUDFLARE_SETUP.md`** — Full setup and troubleshooting
+
+One-time per developer: run `/add-plugin cloudflare` in Cursor (or install from Marketplace), then `npx wrangler login` for local deploys.
+
+---
+
 Full integration branch: **`cursor/integrate-workmode-ui-8edb`**
 
 Includes:

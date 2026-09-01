@@ -13,7 +13,8 @@
     "deploy:pages": "npm run deploy",
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "verify:cursor-mcp": "node --input-type=module -e \"import { readFileSync } from 'node:fs'; JSON.parse(readFileSync('.cursor/mcp.json','utf8')); console.log('OK: .cursor/mcp.json');\""
   },
   "dependencies": {
     "@google/genai": "^1.43.0",

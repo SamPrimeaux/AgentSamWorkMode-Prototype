@@ -1,0 +1,29 @@
+---
+description: Cloudflare platform conventions for Workers deploys, Wrangler, and MCP tools in this repo.
+alwaysApply: true
+---
+
+# Cloudflare platform (Cursor + Cloudflare)
+
+This repo is wired for the official [Cursor + Cloudflare agent setup](https://developers.cloudflare.com/agent-setup/cursor/).
+
+## Three layers (use together)
+
+1. **Skills** — Install the Cloudflare plugin once per developer: `/add-plugin cloudflare` in Cursor, or Cursor Marketplace → Cloudflare. Teaches Workers, Wrangler, Agents SDK, and platform conventions.
+2. **MCP servers** — Project config lives in `.cursor/mcp.json` (OAuth on first tool use). Prefer `cloudflare-docs` for up-to-date API references; use `cloudflare` (Code Mode) for broad account operations; use `cloudflare-builds` and `cloudflare-observability` when debugging deploys.
+3. **Wrangler CLI** — Local dev and deploy: `npm run preview:worker`, `npm run deploy`. Always read `wrangler.jsonc` before changing bindings or worker config.
+
+## Agent-friendly docs
+
+- Global index: https://developers.cloudflare.com/llms.txt
+- Workers: https://developers.cloudflare.com/workers/llms.txt
+- Agents: https://developers.cloudflare.com/agents/llms.txt
+- Append `/index.md` to any docs URL for clean markdown.
+
+## Deploy target
+
+- Worker name: `agentsam-workmode-preview` (see `wrangler.jsonc`)
+- Static assets build: `npm run build:static` then `wrangler deploy`
+- CI: `.github/workflows/deploy-preview.yml` on push to `main`
+
+When editing Workers or Cloudflare resources, @-mention `wrangler.jsonc` in prompts.
