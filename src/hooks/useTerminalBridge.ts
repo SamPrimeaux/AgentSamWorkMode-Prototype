@@ -268,7 +268,7 @@ export function useTerminalBridge(options?: TerminalBridgeOptions) {
   useEffect(() => {
     // Explicit target wins. Otherwise restore only the user's preference; do not
     // silently switch lanes because a workspace or prior connection happens to exist.
-    const next = options?.targetType ?? readPreferredTerminalLane() ?? DEFAULT_TERMINAL_LANE;
+    const next = normalizeTargetType(options?.targetType ?? readPreferredTerminalLane());
     setTargetType(next);
     setState((s) => ({ ...s, targetType: next }));
     void refreshLocalLane();
