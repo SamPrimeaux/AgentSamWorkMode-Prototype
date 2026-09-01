@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch, getWorkspaceId, workspaceQuery } from '../lib/apiClient';
+import {
+  DEFAULT_TERMINAL_LANE,
+  type TerminalLaneTarget,
+} from '../lib/terminal/pairingTypes';
+import {
+  fetchLocalTerminalConnection,
+  persistPreferredTerminalLane,
+  readPreferredTerminalLane,
+  resolveDefaultTerminalLane,
+} from '../lib/terminal/terminalLane';
 
 export type TerminalConfigStatus = {
   terminal_enabled?: boolean;
@@ -10,6 +20,7 @@ export type TerminalConfigStatus = {
   error_code?: string | null;
   workspace_id?: string;
   user_id?: string;
+  selected_target_type?: string;
 };
 
 export type TerminalBridgeState = {
@@ -18,18 +29,23 @@ export type TerminalBridgeState = {
   connecting: boolean;
   authRequired: boolean;
   lastError: string | null;
+  targetType: TerminalLaneTarget;
+  localConnectionActive: boolean;
 };
 
 /**
  * Terminal bridge: config-status probe, one-shot exec, optional WebSocket log stream.
- * Full xterm PTY lives in AgentSamRemix shell (useShellBridge / IAM_TERMINAL_CONNECT).
+ * Defaults to user_hosted_tunnel (your machine) when a local connection is active or preferred.
  */
 export function useTerminalBridge(options?: {
   workspaceId?: string | null;
-  targetType?: 'local' | 'platform_vm' | 'sandbox';
+  targetType?: TerminalLaneTarget;
   onOutputLine?: (line: string) => void;
 }) {
-  const targetType = options?.targetType ?? 'local';
+  const [targetType, setTargetType] = useState<TerminalLaneTarget>(
+    options?.targetType ?? readPreferredTerminalLane(),
+  );
+  const [localConnectionActive, setLocalConnectionActive] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const [state, setState] = useState<TerminalBridgeState>({
     config: null,
@@ -37,6 +53,8 @@ export function useTerminalBridge(options?: {
     connecting: false,
     authRequired: false,
     lastError: null,
+    targetType: options?.targetType ?? DEFAULT_TERMINAL_LANE,
+    localConnectionActive: false,
   });
 
   const appendLine = useCallback(
@@ -45,6 +63,23 @@ export function useTerminalBridge(options?: {
     },
     [options],
   );
+
+  const refreshLocalLane = useCallback(async () => {
+    const local = await fetchLocalTerminalConnection(options?.workspaceId);
+    const active = local?.connection?.is_active === true;
+    setLocalConnectionActive(active);
+    setState((s) => ({ ...s, localConnectionActive: active }));
+    if (!options?.targetType && active) {
+      setTargetType('user_hosted_tunnel');
+    }
+    return active;
+  }, [options?.targetType, options?.workspaceId]);
+
+  const setLane = useCallback((lane: TerminalLaneTarget) => {
+    setTargetType(lane);
+    persistPreferredTerminalLane(lane);
+    setState((s) => ({ ...s, targetType: lane }));
+  }, []);
 
   const refreshConfig = useCallback(async () => {
     const ws = options?.workspaceId ?? getWorkspaceId();
@@ -60,12 +95,21 @@ export function useTerminalBridge(options?: {
         config: null,
         authRequired: res.error.status === 401,
         lastError: res.error.error,
+        targetType,
+        localConnectionActive,
       }));
       return null;
     }
-    setState((s) => ({ ...s, config: res.data, authRequired: false, lastError: null }));
+    setState((s) => ({
+      ...s,
+      config: res.data,
+      authRequired: false,
+      lastError: null,
+      targetType,
+      localConnectionActive,
+    }));
     return res.data;
-  }, [options?.workspaceId, targetType]);
+  }, [localConnectionActive, options?.workspaceId, targetType]);
 
   const disconnect = useCallback(() => {
     if (wsRef.current) {
@@ -78,7 +122,7 @@ export function useTerminalBridge(options?: {
   const connectWebSocket = useCallback(async () => {
     const cfg = await refreshConfig();
     if (!cfg?.terminal_enabled) {
-      appendLine('[terminal] Not enabled — sign in at IAM origin or check workspace policy.');
+      appendLine('[terminal] Not enabled — connect your machine or check workspace policy.');
       return false;
     }
 
@@ -112,7 +156,7 @@ export function useTerminalBridge(options?: {
           connected: false,
           lastError: 'WebSocket error',
         }));
-        appendLine('[terminal] WebSocket error — use AgentSamRemix shell for full PTY.');
+        appendLine('[terminal] WebSocket error — pair your machine or use platform VM lane.');
       };
       socket.onclose = () => {
         setState((s) => ({ ...s, connected: false, connecting: false }));
@@ -169,12 +213,34 @@ export function useTerminalBridge(options?: {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (options?.targetType) {
+        setTargetType(options.targetType);
+        return;
+      }
+      const lane = await resolveDefaultTerminalLane(options?.workspaceId);
+      if (!cancelled) {
+        setTargetType(lane);
+        setState((s) => ({ ...s, targetType: lane }));
+      }
+      await refreshLocalLane();
+    })();
+    return () => {
+      cancelled = true;
+      disconnect();
+    };
+  }, [disconnect, options?.targetType, options?.workspaceId, refreshLocalLane]);
+
+  useEffect(() => {
     void refreshConfig();
-    return () => disconnect();
-  }, [disconnect, refreshConfig]);
+  }, [refreshConfig, targetType]);
 
   return {
     ...state,
+    targetType,
+    setLane,
+    refreshLocalLane,
     refreshConfig,
     connectWebSocket,
     disconnect,

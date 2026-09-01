@@ -4,6 +4,8 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import { logTelemetry, calculateCost } from "./src/lib/telemetry";
+import { createTerminalPairingRouter } from "./src/server/terminalPairing";
+import { mountBridgeProxy, startHttpServer } from "./src/server/bridgeProxy";
 
 dotenv.config();
 
@@ -64,15 +66,23 @@ async function startServer() {
     });
   });
 
+  const workerPublicOrigin = IAM_ORIGIN || `http://localhost:${PORT}`;
+
+  // Device pairing — local dev store; production uses same routes on AgentSamRemix Worker
+  app.use("/api/terminal/pair", createTerminalPairingRouter(() => workerPublicOrigin));
+
   // Proxy platform APIs to AgentSamRemix Worker (auth cookies must be set on IAM origin)
   app.use("/api/agent", proxyToIam);
   app.use("/api/terminal", proxyToIam);
+  app.use("/api/sdk", proxyToIam);
   app.use("/api/artifacts", proxyToIam);
   app.use("/api/cms", proxyToIam);
   app.use("/api/integrations", proxyToIam);
   app.use("/api/gdrive", proxyToIam);
   app.use("/api/auth", proxyToIam);
   app.use("/api/storage", proxyToIam);
+
+  mountBridgeProxy(app);
 
   let aiClient: GoogleGenAI | null = null;
   function getAiClient(): GoogleGenAI | null {
@@ -139,10 +149,8 @@ Respond concisely. Do not invent test results, git status, or deployment URLs.`;
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-    if (IAM_ORIGIN) console.log(`IAM API proxy → ${IAM_ORIGIN}`);
-  });
+  startHttpServer(app, PORT, "0.0.0.0");
+  if (IAM_ORIGIN) console.log(`IAM API proxy → ${IAM_ORIGIN}`);
 }
 
 startServer();

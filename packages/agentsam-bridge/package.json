@@ -1,0 +1,18 @@
+{
+  "name": "agentsam-bridge",
+  "version": "0.1.0",
+  "description": "Thin CLI to pair your local machine with Agent Sam Work Mode",
+  "type": "module",
+  "bin": {
+    "agentsam-bridge": "./bin/agentsam-bridge.js"
+  },
+  "files": ["bin", "src"],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "keywords": ["agentsam", "bridge", "pty", "terminal"],
+  "license": "MIT"
+}
