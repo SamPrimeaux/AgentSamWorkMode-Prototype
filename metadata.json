@@ -1,0 +1,6 @@
+{
+  "name": "Agent Sam Work Mode - Execution Agent",
+  "description": "iOS-native developer agent workbench and multi-channel execution platform for managing repositories, reviewing pull requests, inspecting diffs, and orchestrating brand artifacts.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
