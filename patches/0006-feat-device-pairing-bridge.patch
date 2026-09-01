@@ -1,0 +1,257 @@
+diff --git a/backend/agentsam/terminal/device-pairing.js b/backend/agentsam/terminal/device-pairing.js
+new file mode 100644
+index 0000000..c6e6fd6
+--- /dev/null
++++ b/backend/agentsam/terminal/device-pairing.js
+@@ -0,0 +1,229 @@
++/**
++ * Device pairing codes for user_hosted_tunnel — browser starts, CLI claims.
++ * KV keys: pair:{pair_id}, pair_code:{normalized_code}
++ */
++import { jsonResponse } from '../../src/core/responses.js';
++import { getAuthUser } from '../../src/core/auth.js';
++import {
++  resolveEffectiveWorkspaceId,
++  WORKSPACE_CONTEXT_MISSING,
++} from '../../backend/identity/bootstrap.js';
++import { resolvePtyTenantIdForUser } from '../../backend/agentsam/terminal/pty-workspace-paths.js';
++import { userCanRunPtyFromPolicy } from '../../backend/http/agentsam/routes/pty-policy.js';
++import { generateUserPtyAuthToken } from '../../backend/credentials/user-secrets.js';
++import * as terminalConnections from '../../backend/agentsam/terminal/connections.js';
++import { tryAutoActivateUserHostedTunnel } from '../../src/core/pty-tunnel-provisioner.js';
++
++const PAIR_TTL_SEC = 600;
++
++function trim(v) {
++  return v == null ? '' : String(v).trim();
++}
++
++function normalizeCode(code) {
++  return trim(code).replace(/[^A-Za-z0-9]/g, '').toUpperCase();
++}
++
++function formatCode() {
++  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
++  const bytes = crypto.getRandomValues(new Uint8Array(8));
++  let raw = '';
++  for (let i = 0; i < 8; i++) raw += alphabet[bytes[i] % alphabet.length];
++  return `${raw.slice(0, 4)}-${raw.slice(4)}`;
++}
++
++function randomId(prefix) {
++  const bytes = crypto.getRandomValues(new Uint8Array(12));
++  return `${prefix}_${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
++}
++
++async function kvGet(env, key) {
++  if (!env?.SESSION_CACHE) return null;
++  try {
++    const raw = await env.SESSION_CACHE.get(key);
++    return raw ? JSON.parse(raw) : null;
++  } catch {
++    return null;
++  }
++}
++
++async function kvPut(env, key, value, ttlSec) {
++  if (!env?.SESSION_CACHE) return false;
++  await env.SESSION_CACHE.put(key, JSON.stringify(value), { expirationTtl: ttlSec });
++  return true;
++}
++
++async function kvDelete(env, key) {
++  await env.SESSION_CACHE?.delete(key).catch(() => {});
++}
++
++function coreOrigin(request, env) {
++  const fromEnv = trim(env?.IAM_PUBLIC_ORIGIN || env?.WORKER_PUBLIC_URL);
++  if (fromEnv) return fromEnv.replace(/\/$/, '');
++  try {
++    return new URL(request.url).origin;
++  } catch {
++    return '';
++  }
++}
++
++/**
++ * @param {Request} request
++ * @param {URL} url
++ * @param {Record<string, unknown>} env
++ * @param {Record<string, unknown>} ctx
++ */
++export async function handleTerminalPairApi(request, url, env, ctx) {
++  const path = url.pathname;
++  const method = request.method.toUpperCase();
++  const deps = { ...terminalConnections };
++
++  if (path === '/api/terminal/pair/start' && method === 'POST') {
++    const authUser = await getAuthUser(request, env);
++    if (!authUser) return jsonResponse({ error: 'Unauthorized' }, 401);
++    const wsRes = await resolveEffectiveWorkspaceId(env, request, authUser, {});
++    if (!wsRes.workspaceId) {
++      return jsonResponse({ error: WORKSPACE_CONTEXT_MISSING, code: WORKSPACE_CONTEXT_MISSING }, 400);
++    }
++    if (!(await userCanRunPtyFromPolicy(env, authUser.id, wsRes.workspaceId))) {
++      return jsonResponse({ error: 'terminal_not_enabled' }, 403);
++    }
++
++    const body = await request.json().catch(() => ({}));
++    const pairId = randomId('pair');
++    const code = formatCode();
++    const now = Math.floor(Date.now() / 1000);
++    const record = {
++      pair_id: pairId,
++      code,
++      user_id: String(authUser.id),
++      workspace_id: String(wsRes.workspaceId),
++      tenant_id: (await resolvePtyTenantIdForUser(env, authUser, authUser.id)) || '',
++      status: 'pending',
++      device_name: trim(body?.device_name) || null,
++      platform: trim(body?.platform) || null,
++      pty_token: null,
++      connection_id: null,
++      created_at: now,
++      expires_at: now + PAIR_TTL_SEC,
++      claimed_at: null,
++      connected_at: null,
++    };
++    await kvPut(env, `pair:${pairId}`, record, PAIR_TTL_SEC);
++    await kvPut(env, `pair_code:${normalizeCode(code)}`, { pair_id: pairId }, PAIR_TTL_SEC);
++
++    const workerUrl = coreOrigin(request, env);
++    return jsonResponse({
++      ok: true,
++      pair_id: pairId,
++      code,
++      expires_at: record.expires_at,
++      worker_url: workerUrl,
++      cli_command: `npx agentsam-bridge pair ${code} --worker ${workerUrl}`,
++    });
++  }
++
++  if (path === '/api/terminal/pair/status' && method === 'GET') {
++    const authUser = await getAuthUser(request, env);
++    if (!authUser) return jsonResponse({ error: 'Unauthorized' }, 401);
++    const pairId = trim(url.searchParams.get('pair_id'));
++    const row = await kvGet(env, `pair:${pairId}`);
++    if (!row || row.user_id !== String(authUser.id)) {
++      return jsonResponse({ error: 'pair_not_found' }, 404);
++    }
++    return jsonResponse({
++      ok: true,
++      pair_id: row.pair_id,
++      status: row.status,
++      code: row.status === 'pending' ? row.code : undefined,
++      device_name: row.device_name,
++      platform: row.platform,
++      claimed_at: row.claimed_at,
++      connected_at: row.connected_at,
++      connection_id: row.connection_id,
++      expires_at: row.expires_at,
++    });
++  }
++
++  if (path === '/api/terminal/pair/claim' && method === 'POST') {
++    const body = await request.json().catch(() => ({}));
++    const code = normalizeCode(body?.code);
++    const codeRow = await kvGet(env, `pair_code:${code}`);
++    if (!codeRow?.pair_id) return jsonResponse({ error: 'invalid_or_expired_code' }, 401);
++    const row = await kvGet(env, `pair:${codeRow.pair_id}`);
++    if (!row || row.status !== 'pending' || row.expires_at <= Math.floor(Date.now() / 1000)) {
++      return jsonResponse({ error: 'invalid_or_expired_code' }, 401);
++    }
++
++    const authUser = { id: row.user_id, person_uuid: null, email: null, tenant_id: row.tenant_id };
++    const tokenResult = await generateUserPtyAuthToken(env, authUser, row.workspace_id, request, {}, deps);
++    if (!tokenResult.ok) {
++      return jsonResponse({ error: tokenResult.error }, tokenResult.status || 500);
++    }
++
++    row.status = 'claimed';
++    row.pty_token = tokenResult.token;
++    row.connection_id = tokenResult.connection_id;
++    row.device_name = trim(body?.device_name) || 'My machine';
++    row.platform = trim(body?.platform) || 'unknown';
++    row.claimed_at = Math.floor(Date.now() / 1000);
++    await kvPut(env, `pair:${row.pair_id}`, row, PAIR_TTL_SEC);
++    await kvDelete(env, `pair_code:${code}`);
++
++    const workerUrl = coreOrigin(request, env);
++    return jsonResponse({
++      ok: true,
++      pair_id: row.pair_id,
++      pty_token: tokenResult.token,
++      worker_url: workerUrl,
++      workspace_id: row.workspace_id,
++      user_id: row.user_id,
++      connection_id: tokenResult.connection_id,
++      register_url: `${workerUrl}/api/terminal/session/register`,
++      instructions: 'Run agentsam-bridge run after pairing to register your tunnel.',
++    });
++  }
++
++  if (path === '/api/terminal/pair/complete' && method === 'POST') {
++    const auth = request.headers.get('Authorization') || '';
++    const bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : auth.trim();
++    const body = await request.json().catch(() => ({}));
++    const pairId = trim(body?.pair_id);
++    const row = await kvGet(env, `pair:${pairId}`);
++    if (!row || !row.pty_token || bearer !== row.pty_token) {
++      return jsonResponse({ error: 'unauthorized' }, 401);
++    }
++
++    const tunnelUrl = trim(body?.tunnel_url || body?.ws_url);
++    if (tunnelUrl) {
++      await tryAutoActivateUserHostedTunnel(env, tunnelUrl, row.user_id, row.workspace_id);
++    }
++
++    row.status = 'connected';
++    row.connected_at = Math.floor(Date.now() / 1000);
++    await kvPut(env, `pair:${row.pair_id}`, row, PAIR_TTL_SEC);
++
++    return jsonResponse({
++      ok: true,
++      connection_activated: true,
++      connection_id: row.connection_id,
++    });
++  }
++
++  const deleteMatch = path.match(/^\/api\/terminal\/pair\/([^/]+)$/);
++  if (deleteMatch && method === 'DELETE') {
++    const authUser = await getAuthUser(request, env);
++    if (!authUser) return jsonResponse({ error: 'Unauthorized' }, 401);
++    const pairId = deleteMatch[1];
++    const row = await kvGet(env, `pair:${pairId}`);
++    if (!row || row.user_id !== String(authUser.id)) {
++      return jsonResponse({ error: 'pair_not_found' }, 404);
++    }
++    row.status = 'cancelled';
++    await kvPut(env, `pair:${pairId}`, row, 60);
++    await kvDelete(env, `pair_code:${normalizeCode(row.code)}`);
++    return jsonResponse({ ok: true });
++  }
++
++  return null;
++}
+diff --git a/src/api/terminal.js b/src/api/terminal.js
+index c7cec18..b7bfa11 100644
+--- a/src/api/terminal.js
++++ b/src/api/terminal.js
+@@ -66,6 +66,7 @@ import { resolveWorkspaceCloudflareCredentials } from '../core/workspace-cloudfl
+ import { resolvePtySessionCloudflareEnv } from '../core/pty-session-cloudflare-env.js';
+ import { resolveConnectionAuthToken } from '../../backend/agentsam/terminal/connection-auth.js';
+ import { requireTerminalTargetType, sandboxLifecycleFromInput } from '../../backend/agentsam/terminal/execution-lane.js';
++import { handleTerminalPairApi } from '../../backend/agentsam/terminal/device-pairing.js';
+ 
+ export const TERMINAL_CONNECTION_DEPS = Object.freeze({ ...terminalConnections, resolveConnectionAuthToken, requireTerminalConnectionTargetType: requireTerminalTargetType, sandboxLifecycleFromInput });
+ 
+@@ -74,6 +75,9 @@ export async function handleTerminalApi(request, url, env, ctx) {
+   const path   = url.pathname;
+   const method = request.method.toUpperCase();
+ 
++  const pairRes = await handleTerminalPairApi(request, url, env, ctx);
++  if (pairRes) return pairRes;
++
+   // POST /api/terminal/session/verify — PTY backend validates bearer vs D1 terminal_sessions (token_mint)
+   if (path === '/api/terminal/session/verify' && method === 'POST') {
+     const authHdr = request.headers.get('Authorization') || '';

@@ -50,6 +50,8 @@ import { cn } from '../../lib/utils';
 interface AgentSamWorkModeProps {
   onDispatchAgentMessage: (message: string) => void;
   onOpenTerminal?: () => void;
+  onConnectMachine?: () => void;
+  localConnectionActive?: boolean;
   messages?: ChatMessageItem[];
   isProcessing?: boolean;
   activePath?: string;
@@ -59,6 +61,8 @@ interface AgentSamWorkModeProps {
 export const AgentSamWorkMode: React.FC<AgentSamWorkModeProps> = ({
   onDispatchAgentMessage,
   onOpenTerminal,
+  onConnectMachine,
+  localConnectionActive = false,
   messages = [],
   isProcessing = false,
   activePath = '',
@@ -166,7 +170,22 @@ export const AgentSamWorkMode: React.FC<AgentSamWorkModeProps> = ({
             <span className="hidden sm:inline">Share</span>
           </button>
 
-          {/* Agent Computer / Browser Trigger */}
+          {/* Connect machine */}
+          <button
+            onClick={() => (onConnectMachine ? onConnectMachine() : setIsExecOsSheetOpen(true))}
+            title="Pair your machine with agentsam-bridge"
+            aria-label="Connect machine"
+            className={cn(
+              'flex items-center gap-1.5 min-h-[44px] px-3 sm:px-3.5 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95 shadow-xs cursor-pointer touch-manipulation border',
+              localConnectionActive
+                ? 'bg-emerald-600/15 text-emerald-300 border-emerald-500/30'
+                : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border-zinc-700',
+            )}
+          >
+            <Terminal size={14} className={localConnectionActive ? 'text-emerald-400' : 'text-zinc-400'} />
+            <span className="hidden sm:inline">{localConnectionActive ? 'Machine live' : 'Connect machine'}</span>
+          </button>
+
           <button
             onClick={() => setIsAgentComputerOpen(true)}
             title="Open Agent Computer & Live Browser Runtime"
@@ -409,11 +428,23 @@ export const AgentSamWorkMode: React.FC<AgentSamWorkModeProps> = ({
               {/* Quick Status / Environment Indicator */}
               <div className="mt-auto p-3 rounded-2xl bg-zinc-900/50 border border-zinc-800/80 text-xs space-y-2 text-zinc-400 font-mono">
                 <div className="flex items-center justify-between">
-                  <span>ExecOS Status:</span>
-                  <span className="text-emerald-400 flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    Port {execOsStatus.daemonPort || 3099}
-                  </span>
+                  <span>Local lane:</span>
+                  <button
+                    type="button"
+                    onClick={() => onConnectMachine?.()}
+                    className={cn(
+                      'flex items-center gap-1',
+                      localConnectionActive ? 'text-emerald-400' : 'text-amber-400 hover:text-amber-300',
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'w-1.5 h-1.5 rounded-full',
+                        localConnectionActive ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400',
+                      )}
+                    />
+                    {localConnectionActive ? 'user_hosted_tunnel' : 'Not paired'}
+                  </button>
                 </div>
                 <div className="flex items-center justify-between">
                   <span>PWA Manifest:</span>

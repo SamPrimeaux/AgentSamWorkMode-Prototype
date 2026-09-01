@@ -4,7 +4,8 @@ import {
   FlexLayoutMode,
   ModelChoice, 
   WorkSubTab,
-  ChatMessageItem, 
+  ChatMessageItem,
+  ExecutionLane, 
   PresentationDeck, 
   ClientWebsiteData, 
   DashboardMetric, 
@@ -27,6 +28,9 @@ import { useArtifactsBridge } from './hooks/useArtifactsBridge';
 import { useCmsBridge } from './hooks/useCmsBridge';
 import { useTelemetryBridge } from './hooks/useTelemetryBridge';
 import { useTerminalBridge } from './hooks/useTerminalBridge';
+import { ConnectMachineSheet } from './components/workbench/ConnectMachineSheet';
+import { targetToExecutionLane } from './components/terminal/TerminalLaneSelector';
+import { executionLaneToTarget } from './lib/terminal/terminalLane';
 
 // Configuration and Navigation Architecture
 import { ConfigurationProvider, useConfiguration } from './contexts/ConfigurationContext';
@@ -71,6 +75,7 @@ function AppInner() {
   const [isPresentationOpen, setIsPresentationOpen] = useState<boolean>(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [terminalSeedCommand, setTerminalSeedCommand] = useState<string | null>(null);
+  const [connectMachineOpen, setConnectMachineOpen] = useState(false);
 
   // Model & Context (Initialized dynamically from environment-aware config)
   const [selectedModel, setSelectedModel] = useState<ModelChoice>(config.defaultModel);
@@ -222,6 +227,17 @@ function AppInner() {
     void terminal.connectWebSocket();
   }, [openShellTerminal, terminal]);
 
+  const handleConnectMachine = useCallback(() => {
+    setConnectMachineOpen(true);
+  }, []);
+
+  const handleTerminalLaneChange = useCallback(
+    (lane: ExecutionLane) => {
+      terminal.setLane(executionLaneToTarget(lane));
+    },
+    [terminal],
+  );
+
   useCommandPaletteShortcut(() => setCommandPaletteOpen(true));
 
   return (
@@ -345,6 +361,8 @@ function AppInner() {
                     telemetryLogs={telemetryLogs}
                     onPresentDeck={() => setIsPresentationOpen(true)}
                     onOpenTerminal={handleOpenTerminal}
+                    onConnectMachine={handleConnectMachine}
+                    localConnectionActive={terminal.localConnectionActive}
                     onDispatchAgentMessage={(msg) => handleSendMessage(msg, selectedModel)}
                     chatMessages={messages}
                     isAgentProcessing={isProcessing}
@@ -385,6 +403,8 @@ function AppInner() {
                     telemetryLogs={telemetryLogs}
                     onPresentDeck={() => setIsPresentationOpen(true)}
                     onOpenTerminal={handleOpenTerminal}
+                    onConnectMachine={handleConnectMachine}
+                    localConnectionActive={terminal.localConnectionActive}
                     onDispatchAgentMessage={(msg) => handleSendMessage(msg, selectedModel)}
                     chatMessages={messages}
                     isAgentProcessing={isProcessing}
@@ -410,6 +430,23 @@ function AppInner() {
         terminalConnected={terminal.connected}
         authRequired={terminal.authRequired || git.authRequired}
         onExecCommand={(cmd) => void terminal.execCommand(cmd)}
+        activeLane={targetToExecutionLane(terminal.targetType)}
+        onChangeLane={handleTerminalLaneChange}
+        localConnectionActive={terminal.localConnectionActive}
+        onConnectMachine={handleConnectMachine}
+      />
+
+      <ConnectMachineSheet
+        isOpen={connectMachineOpen}
+        onClose={() => setConnectMachineOpen(false)}
+        workspaceId={platform.workspaceId}
+        currentLane={terminal.targetType}
+        localConnectionActive={terminal.localConnectionActive}
+        onChangeLane={(lane) => terminal.setLane(lane)}
+        onPaired={() => {
+          void terminal.refreshLocalLane();
+          void terminal.refreshConfig();
+        }}
       />
 
       <CfUnifiedCommandPalette

@@ -4,6 +4,7 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import { logTelemetry, calculateCost } from "./src/lib/telemetry";
+import { createTerminalPairingRouter } from "./src/server/terminalPairing";
 
 dotenv.config();
 
@@ -64,9 +65,15 @@ async function startServer() {
     });
   });
 
+  const workerPublicOrigin = IAM_ORIGIN || `http://localhost:${PORT}`;
+
+  // Device pairing — local dev store; production uses same routes on AgentSamRemix Worker
+  app.use("/api/terminal/pair", createTerminalPairingRouter(() => workerPublicOrigin));
+
   // Proxy platform APIs to AgentSamRemix Worker (auth cookies must be set on IAM origin)
   app.use("/api/agent", proxyToIam);
   app.use("/api/terminal", proxyToIam);
+  app.use("/api/sdk", proxyToIam);
   app.use("/api/artifacts", proxyToIam);
   app.use("/api/cms", proxyToIam);
   app.use("/api/integrations", proxyToIam);

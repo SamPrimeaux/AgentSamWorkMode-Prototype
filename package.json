@@ -11,6 +11,7 @@
     "preview:worker": "npm run build:static && wrangler dev",
     "deploy": "npm run build:static && wrangler deploy",
     "deploy:pages": "npm run deploy",
+    "bridge": "node packages/agentsam-bridge/bin/agentsam-bridge.js",
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",

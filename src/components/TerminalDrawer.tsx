@@ -51,6 +51,10 @@ interface TerminalDrawerProps {
   terminalConnected?: boolean;
   authRequired?: boolean;
   onExecCommand?: (command: string) => void;
+  activeLane?: ExecutionLane;
+  onChangeLane?: (lane: ExecutionLane) => void;
+  localConnectionActive?: boolean;
+  onConnectMachine?: () => void;
 }
 
 function buildTerminalBanner(activePath: string, activeBranch: string, opts?: { connected?: boolean; authRequired?: boolean }): string[] {
@@ -78,10 +82,14 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
   terminalConnected = false,
   authRequired = false,
   onExecCommand,
+  activeLane: activeLaneProp,
+  onChangeLane,
+  localConnectionActive,
+  onConnectMachine,
 }) => {
   const [activeTab, setActiveTab] = useState<'output' | 'files' | 'environment' | 'traces'>('output');
   const [snapPosition, setSnapPosition] = useState<TerminalSnapPosition>(initialSnapPosition);
-  const [activeLane, setActiveLane] = useState<ExecutionLane>('local_mac');
+  const [activeLane, setActiveLane] = useState<ExecutionLane>(activeLaneProp ?? 'local_mac');
   const [ownershipState, setOwnershipState] = useState<TerminalOwnershipState>('idle');
   const [commandInput, setCommandInput] = useState('');
   const [ctrlActive, setCtrlActive] = useState(false);
@@ -99,6 +107,15 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
       ? customLogs
       : buildTerminalBanner(activePath, activeBranch, { connected: terminalConnected, authRequired }),
   );
+
+  useEffect(() => {
+    if (activeLaneProp) setActiveLane(activeLaneProp);
+  }, [activeLaneProp]);
+
+  const handleLaneChange = (lane: ExecutionLane) => {
+    setActiveLane(lane);
+    onChangeLane?.(lane);
+  };
 
   useEffect(() => {
     if (customLogs && customLogs.length > 0) {
@@ -367,7 +384,13 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
 
             {/* Execution Lane Switcher */}
             <div className="hidden lg:block">
-              <TerminalLaneSelector currentLane={activeLane} onChangeLane={setActiveLane} isCompact />
+              <TerminalLaneSelector
+                currentLane={activeLane}
+                onChangeLane={handleLaneChange}
+                isCompact
+                localConnectionActive={localConnectionActive}
+                onConnectMachine={onConnectMachine}
+              />
             </div>
 
             {/* Quick Action Chips & Window controls */}

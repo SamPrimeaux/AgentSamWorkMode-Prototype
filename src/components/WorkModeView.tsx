@@ -63,6 +63,8 @@ interface WorkModeViewProps {
   telemetryLogs: TelemetryData[];
   onPresentDeck: () => void;
   onOpenTerminal: () => void;
+  onConnectMachine?: () => void;
+  localConnectionActive?: boolean;
   onDispatchAgentMessage?: (message: string) => void;
   chatMessages?: ChatMessageItem[];
   isAgentProcessing?: boolean;
@@ -84,6 +86,8 @@ export const WorkModeView: React.FC<WorkModeViewProps> = ({
   telemetryLogs,
   onPresentDeck,
   onOpenTerminal,
+  onConnectMachine,
+  localConnectionActive,
   onDispatchAgentMessage,
   chatMessages = [],
   isAgentProcessing = false,
@@ -190,6 +194,8 @@ export const WorkModeView: React.FC<WorkModeViewProps> = ({
           <AgentSamWorkMode
             onDispatchAgentMessage={onDispatchAgentMessage || (() => {})}
             onOpenTerminal={onOpenTerminal}
+            onConnectMachine={onConnectMachine}
+            localConnectionActive={localConnectionActive}
             messages={chatMessages}
             isProcessing={isAgentProcessing}
             activePath={activePath}
