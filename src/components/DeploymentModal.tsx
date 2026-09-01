@@ -19,6 +19,9 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import confetti from 'canvas-confetti';
+import { RuntimeTargetPicker } from './workbench/RuntimeTargetPicker';
+import { RuntimeTarget } from '../types.runtime-target';
+import { DockerDeployPanel } from './workbench/DockerDeployPanel';
 
 interface DeploymentModalProps {
   isOpen: boolean;
@@ -38,6 +41,7 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
   const [copiedUrl, setCopiedUrl] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'deploy' | 'export' | 'domain'>('deploy');
   const [customDomainInput, setCustomDomainInput] = useState(website.deployment?.customDomain || '');
+  const [runtimeTarget, setRuntimeTarget] = useState<RuntimeTarget>('cloudflare_workers');
 
   const liveUrl = website.deployment?.deployedUrl || '';
 
@@ -247,6 +251,15 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
           {/* ================= TAB 1: DEPLOYMENT STATUS ================= */}
           {activeTab === 'deploy' && (
             <div className="space-y-4">
+              <RuntimeTargetPicker currentTarget={runtimeTarget} onChangeTarget={setRuntimeTarget} />
+
+              {runtimeTarget === 'docker_local' ? (
+                <DockerDeployPanel
+                  appSlug={website.clientName.toLowerCase().replace(/\s+/g, '-')}
+                  defaultAppType="static"
+                />
+              ) : (
+                <>
               {/* Live URL Banner */}
               <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-3 flex-wrap">
                 <div className="space-y-0.5">
@@ -315,6 +328,8 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
                   <span>{isDeploying ? 'Deploying to Global Edge CDN...' : 'Trigger Instant Redeployment'}</span>
                 </button>
               </div>
+                </>
+              )}
             </div>
           )}
 
