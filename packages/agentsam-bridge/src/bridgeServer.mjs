@@ -1,9 +1,10 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
-import { createReadStream, promises as fs } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
+import { gitDiffText, gitLogJson, gitStatusJson } from './git.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -130,6 +131,27 @@ export function startBridgeServer(opts) {
         const parsed = JSON.parse(body || '{}');
         const out = await writeFile(root, parsed.path, parsed.content ?? '');
         return json(res, 200, { ok: true, ...out });
+      }
+      if (url.pathname === '/git/status' && req.method === 'GET') {
+        const status = await gitStatusJson(root);
+        return json(res, 200, { ok: true, ...status });
+      }
+      if (url.pathname === '/git/diff' && req.method === 'GET') {
+        const filePath = url.searchParams.get('path');
+        const patch = await gitDiffText(root, { path: filePath || undefined });
+        const status = await gitStatusJson(root);
+        return json(res, 200, {
+          ok: true,
+          patch,
+          branch: status.branch,
+          hash: status.hash,
+          tracking_branch: status.tracking_branch,
+        });
+      }
+      if (url.pathname === '/git/log' && req.method === 'GET') {
+        const n = Number(url.searchParams.get('n') || 5);
+        const commits = await gitLogJson(root, Number.isFinite(n) ? n : 5);
+        return json(res, 200, { ok: true, commits });
       }
       res.writeHead(404);
       res.end('not found');

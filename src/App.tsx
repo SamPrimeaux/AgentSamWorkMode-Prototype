@@ -28,6 +28,7 @@ import { useArtifactsBridge } from './hooks/useArtifactsBridge';
 import { useCmsBridge } from './hooks/useCmsBridge';
 import { useTelemetryBridge } from './hooks/useTelemetryBridge';
 import { useTerminalBridge } from './hooks/useTerminalBridge';
+import { useWorkDiffSession } from './hooks/useWorkDiffSession';
 import { ConnectMachineSheet } from './components/workbench/ConnectMachineSheet';
 import { targetToExecutionLane } from './components/terminal/TerminalLaneSelector';
 import { executionLaneToTarget } from './lib/terminal/terminalLane';
@@ -115,6 +116,8 @@ function AppInner() {
     onOutputLine: appendTerminalLine,
   });
 
+  const workDiff = useWorkDiffSession(platform.workspaceId);
+
   // Sync live git branch / repo path from platform API
   useEffect(() => {
     if (git.live && git.activeBranch) {
@@ -197,6 +200,7 @@ function AppInner() {
       };
 
       setMessages((prev) => [...prev, agentMsg]);
+      void workDiff.refresh(result.text);
     } catch (err: any) {
       const errorMsg: ChatMessageItem = {
         id: 'msg-' + (Date.now() + 1),
@@ -368,6 +372,11 @@ function AppInner() {
                     isAgentProcessing={isProcessing}
                     activePath={activePath}
                     activeBranch={activeBranch}
+                    workDiffSession={workDiff.session}
+                    workDiffLoading={workDiff.loading}
+                    workDiffError={workDiff.error}
+                    workDiffSource={workDiff.source}
+                    onRefreshWorkDiff={workDiff.refresh}
                   />
                 </section>
               </div>
@@ -410,6 +419,11 @@ function AppInner() {
                     isAgentProcessing={isProcessing}
                     activePath={activePath}
                     activeBranch={activeBranch}
+                    workDiffSession={workDiff.session}
+                    workDiffLoading={workDiff.loading}
+                    workDiffError={workDiff.error}
+                    workDiffSource={workDiff.source}
+                    onRefreshWorkDiff={workDiff.refresh}
                   />
                 )}
               </div>

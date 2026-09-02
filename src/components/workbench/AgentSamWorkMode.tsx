@@ -18,7 +18,7 @@ import { ExecOsLocalLaneSheet } from './ExecOsLocalLaneSheet';
 import { FlexFitComposer } from './FlexFitComposer';
 import { AgentComputerSurface } from '../browser/AgentComputerSurface';
 import { WorkDiffChatChangesView } from '../workdiff';
-import { MOCK_WORK_DIFF_SESSION } from '../../data/mockWorkDiffSession';
+import type { WorkDiffSession } from '../../lib/workdiff/interactions';
 import { 
   X, 
   Layers, 
@@ -58,6 +58,11 @@ interface AgentSamWorkModeProps {
   isProcessing?: boolean;
   activePath?: string;
   activeBranch?: string;
+  workDiffSession?: WorkDiffSession | null;
+  workDiffLoading?: boolean;
+  workDiffError?: string | null;
+  workDiffSource?: 'bridge' | 'iam' | null;
+  onRefreshWorkDiff?: (agentSummary?: string) => Promise<WorkDiffSession | null>;
 }
 
 export const AgentSamWorkMode: React.FC<AgentSamWorkModeProps> = ({
@@ -69,6 +74,11 @@ export const AgentSamWorkMode: React.FC<AgentSamWorkModeProps> = ({
   isProcessing = false,
   activePath = '',
   activeBranch = 'main',
+  workDiffSession = null,
+  workDiffLoading = false,
+  workDiffError = null,
+  workDiffSource = null,
+  onRefreshWorkDiff,
 }) => {
   const { toggleSidebar, isCollapsed } = useSidebar();
   
@@ -109,6 +119,16 @@ export const AgentSamWorkMode: React.FC<AgentSamWorkModeProps> = ({
       setLikedMap((prev) => ({ ...prev, [id]: false }));
     }
   };
+
+  const handleOpenWorkDiff = async () => {
+    const lastAgent = [...messages].reverse().find((m) => m.role === 'agent');
+    if (onRefreshWorkDiff) {
+      await onRefreshWorkDiff(lastAgent?.content);
+    }
+    setIsWorkDiffOpen(true);
+  };
+
+  const changedFileCount = workDiffSession?.pr.files.length ?? 0;
 
   const handleComposerSubmit = (text: string, model?: ModelChoice) => {
     if (!text.trim()) return;
@@ -432,19 +452,25 @@ export const AgentSamWorkMode: React.FC<AgentSamWorkModeProps> = ({
                 <div className="space-y-1.5">
                   <button
                     type="button"
-                    onClick={() => setIsWorkDiffOpen(true)}
-                    className="w-full min-h-[48px] p-3 rounded-xl bg-purple-600/15 hover:bg-purple-600/25 border border-purple-500/25 text-left flex items-center justify-between gap-2 text-xs transition-colors cursor-pointer active:scale-95 touch-manipulation"
+                    onClick={() => void handleOpenWorkDiff()}
+                    disabled={workDiffLoading}
+                    className="w-full min-h-[48px] p-3 rounded-xl bg-purple-600/15 hover:bg-purple-600/25 border border-purple-500/25 text-left flex items-center justify-between gap-2 text-xs transition-colors cursor-pointer active:scale-95 touch-manipulation disabled:opacity-60"
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <FileCode size={14} className="text-purple-400 shrink-0" />
                       <span className="text-zinc-200 font-medium truncate">
-                        Review changes ({MOCK_WORK_DIFF_SESSION.pr.files.length})
+                        {workDiffLoading
+                          ? 'Loading git changes…'
+                          : `Review changes (${changedFileCount})`}
                       </span>
                     </div>
                     <span className="font-mono text-emerald-400 shrink-0">
-                      +{MOCK_WORK_DIFF_SESSION.pr.additions}
+                      {workDiffSession ? `+${workDiffSession.pr.additions}` : workDiffSource || 'git'}
                     </span>
                   </button>
+                  {workDiffError && (
+                    <p className="text-[11px] text-amber-400/90 px-1 leading-snug">{workDiffError}</p>
+                  )}
 
                   <button
                     type="button"
@@ -511,20 +537,37 @@ export const AgentSamWorkMode: React.FC<AgentSamWorkModeProps> = ({
       )}
 
       {/* 5. Modals & Native Bottom Sheets */}
-      {isWorkDiffOpen && (
+      {isWorkDiffOpen && workDiffSession && (
         <div className="fixed inset-0 z-[70]">
           <WorkDiffChatChangesView
-            session={MOCK_WORK_DIFF_SESSION}
-            title="Cloudflare Cursor details"
+            session={workDiffSession}
+            title={workDiffSession.pr.title}
             onBack={() => setIsWorkDiffOpen(false)}
             onFollowUp={handleComposerSubmit}
             onSquashAndMerge={() => {
               setIsWorkDiffOpen(false);
               handleComposerSubmit(
-                `Squashed and merged PR #${MOCK_WORK_DIFF_SESSION.pr.number} into ${MOCK_WORK_DIFF_SESSION.pr.targetBranch}.`,
+                `Ready to commit changes on ${workDiffSession.pr.branch} (+${workDiffSession.pr.additions} / -${workDiffSession.pr.deletions}).`,
               );
             }}
           />
+        </div>
+      )}
+      {isWorkDiffOpen && !workDiffSession && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-6">
+          <div className="max-w-sm w-full rounded-2xl bg-zinc-900 border border-zinc-700 p-5 space-y-3 text-center">
+            <p className="text-sm text-zinc-200">No git changes to review.</p>
+            <p className="text-xs text-zinc-500">
+              {workDiffError || 'Run npm run dev with agentsam-bridge, or connect IAM git.'}
+            </p>
+            <button
+              type="button"
+              onClick={() => setIsWorkDiffOpen(false)}
+              className="w-full min-h-[44px] rounded-full bg-zinc-800 text-zinc-200 text-sm font-medium"
+            >
+              Close
+            </button>
+          </div>
         </div>
       )}
 
