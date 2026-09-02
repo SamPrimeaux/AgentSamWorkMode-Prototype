@@ -17,6 +17,8 @@ import { PwaCacheInspectorSheet } from './PwaCacheInspectorSheet';
 import { ExecOsLocalLaneSheet } from './ExecOsLocalLaneSheet';
 import { FlexFitComposer } from './FlexFitComposer';
 import { AgentComputerSurface } from '../browser/AgentComputerSurface';
+import { WorkDiffChatChangesView } from '../workdiff';
+import { MOCK_WORK_DIFF_SESSION } from '../../data/mockWorkDiffSession';
 import { 
   X, 
   Layers, 
@@ -79,7 +81,7 @@ export const AgentSamWorkMode: React.FC<AgentSamWorkModeProps> = ({
   const [dislikedMap, setDislikedMap] = useState<Record<string, boolean>>({});
 
   // Sheet Overlays State
-  const [isDiffSheetOpen, setIsDiffSheetOpen] = useState(false);
+  const [isWorkDiffOpen, setIsWorkDiffOpen] = useState(false);
   const [isCacheInspectorOpen, setIsCacheInspectorOpen] = useState(false);
   const [isExecOsSheetOpen, setIsExecOsSheetOpen] = useState(false);
   const [isAgentComputerOpen, setIsAgentComputerOpen] = useState(false);
@@ -429,8 +431,24 @@ export const AgentSamWorkMode: React.FC<AgentSamWorkModeProps> = ({
 
                 <div className="space-y-1.5">
                   <button
-                    onClick={() => setIsDiffSheetOpen(true)}
-                    className="w-full min-h-[40px] p-2.5 rounded-xl bg-zinc-800/40 hover:bg-zinc-800/80 border border-zinc-700/40 text-left flex items-center gap-2 text-xs font-mono text-zinc-300 hover:text-purple-300 transition-colors cursor-pointer active:scale-95"
+                    type="button"
+                    onClick={() => setIsWorkDiffOpen(true)}
+                    className="w-full min-h-[48px] p-3 rounded-xl bg-purple-600/15 hover:bg-purple-600/25 border border-purple-500/25 text-left flex items-center justify-between gap-2 text-xs transition-colors cursor-pointer active:scale-95 touch-manipulation"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <FileCode size={14} className="text-purple-400 shrink-0" />
+                      <span className="text-zinc-200 font-medium truncate">
+                        Review changes ({MOCK_WORK_DIFF_SESSION.pr.files.length})
+                      </span>
+                    </div>
+                    <span className="font-mono text-emerald-400 shrink-0">
+                      +{MOCK_WORK_DIFF_SESSION.pr.additions}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="w-full min-h-[40px] p-2.5 rounded-xl bg-zinc-800/40 hover:bg-zinc-800/80 border border-zinc-700/40 text-left flex items-center gap-2 text-xs font-mono text-zinc-300 transition-colors"
                   >
                     <span className="text-zinc-500">//</span>
                     <span className="truncate">{activePath || 'No workspace path set'}</span>
@@ -478,59 +496,37 @@ export const AgentSamWorkMode: React.FC<AgentSamWorkModeProps> = ({
       </div>
 
       {/* 4. Bottom Floating FlexFit Composer / Connector Drawer */}
-      <div className="absolute bottom-4 left-0 right-0 z-30 pointer-events-auto">
-        <FlexFitComposer
-          onSendMessage={handleComposerSubmit}
-          onOpenTerminal={onOpenTerminal}
-          onOpenConnectorDrawer={() => setIsExecOsSheetOpen(true)}
-          placeholder="Work with Agent Sam"
-          selectedModel={selectedModel}
-          onSelectModel={setSelectedModel}
-          isProcessing={isProcessing}
-        />
-      </div>
+      {!isWorkDiffOpen && (
+        <div className="absolute bottom-4 left-0 right-0 z-30 pointer-events-auto">
+          <FlexFitComposer
+            onSendMessage={handleComposerSubmit}
+            onOpenTerminal={onOpenTerminal}
+            onOpenConnectorDrawer={() => setIsExecOsSheetOpen(true)}
+            placeholder="Work with Agent Sam"
+            selectedModel={selectedModel}
+            onSelectModel={setSelectedModel}
+            isProcessing={isProcessing}
+          />
+        </div>
+      )}
 
       {/* 5. Modals & Native Bottom Sheets */}
-      {/* Diff Inspector Sheet */}
-      <WorkbenchDiffSheet
-        isOpen={isDiffSheetOpen}
-        onClose={() => setIsDiffSheetOpen(false)}
-        pr={{
-          id: 'pr-1',
-          number: 402,
-          title: 'Fix terminal operator policy & drift',
-          branch: 'fix/terminal-operator-policy',
-          targetBranch: 'main',
-          author: 'Agent Sam',
-          authorAvatar: 'AS',
-          status: 'in_review',
-          createdAt: '12m ago',
-          updatedAt: 'Just now',
-          summary: '+142 -38 lines (4 files)',
-          specMarkdown: 'Fix terminal operator policy and reconcile drift in test ratchet.',
-          additions: 142,
-          deletions: 38,
-          files: [
-            {
-              id: 'f-1',
-              filename: 'dispatch.ts',
-              path: 'src/server/mcp/dispatch.ts',
-              status: 'modified',
-              additions: 45,
-              deletions: 12,
-              diffLines: [
-                { type: 'header', content: '@@ -12,8 +12,12 @@ export function dispatchRatchet()' },
-                { type: 'del', oldLine: 14, content: '-  logAgentsamMcpToolExecution(toolName);' },
-                { type: 'add', newLine: 14, content: '+  // Ratchet log removed for clean execution policy' }
-              ]
-            }
-          ]
-        }}
-        onSquashAndMerge={() => {
-          setIsDiffSheetOpen(false);
-          handleComposerSubmit("Squashed and merged PR #402 into main.");
-        }}
-      />
+      {isWorkDiffOpen && (
+        <div className="fixed inset-0 z-[70]">
+          <WorkDiffChatChangesView
+            session={MOCK_WORK_DIFF_SESSION}
+            title="Cloudflare Cursor details"
+            onBack={() => setIsWorkDiffOpen(false)}
+            onFollowUp={handleComposerSubmit}
+            onSquashAndMerge={() => {
+              setIsWorkDiffOpen(false);
+              handleComposerSubmit(
+                `Squashed and merged PR #${MOCK_WORK_DIFF_SESSION.pr.number} into ${MOCK_WORK_DIFF_SESSION.pr.targetBranch}.`,
+              );
+            }}
+          />
+        </div>
+      )}
 
       {/* PWA Cache Engine Diagnostics Sheet */}
       <PwaCacheInspectorSheet
