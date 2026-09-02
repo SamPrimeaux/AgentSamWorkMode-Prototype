@@ -60,6 +60,38 @@ export function mountBridgeProxy(app: Express) {
       res.status(502).json({ ok: false, error: err instanceof Error ? err.message : "proxy error" });
     }
   });
+
+  app.get("/api/bridge/git/status", async (_req, res) => {
+    try {
+      const upstream = await fetch(bridgeHttpUrl("/git/status"));
+      const body = await upstream.json().catch(() => ({}));
+      res.status(upstream.status).json(body);
+    } catch (err: unknown) {
+      res.status(502).json({ ok: false, error: err instanceof Error ? err.message : "proxy error" });
+    }
+  });
+
+  app.get("/api/bridge/git/diff", async (req, res) => {
+    try {
+      const q = new URLSearchParams(req.query as Record<string, string>).toString();
+      const upstream = await fetch(`${bridgeHttpUrl("/git/diff")}${q ? `?${q}` : ""}`);
+      const body = await upstream.json().catch(() => ({}));
+      res.status(upstream.status).json(body);
+    } catch (err: unknown) {
+      res.status(502).json({ ok: false, error: err instanceof Error ? err.message : "proxy error" });
+    }
+  });
+
+  app.get("/api/bridge/git/log", async (req, res) => {
+    try {
+      const q = new URLSearchParams(req.query as Record<string, string>).toString();
+      const upstream = await fetch(`${bridgeHttpUrl("/git/log")}${q ? `?${q}` : ""}`);
+      const body = await upstream.json().catch(() => ({}));
+      res.status(upstream.status).json(body);
+    } catch (err: unknown) {
+      res.status(502).json({ ok: false, error: err instanceof Error ? err.message : "proxy error" });
+    }
+  });
 }
 
 export function attachBridgeWebSocketProxy(server: http.Server) {

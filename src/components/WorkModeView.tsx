@@ -40,6 +40,7 @@ import {
   SlideItem,
   ChatMessageItem,
 } from '../types';
+import type { WorkDiffSession } from '../lib/workdiff/interactions';
 import { cn } from '../lib/utils';
 import confetti from 'canvas-confetti';
 import { LiveWebsiteSandbox } from './LiveWebsiteSandbox';
@@ -70,6 +71,11 @@ interface WorkModeViewProps {
   isAgentProcessing?: boolean;
   activePath?: string;
   activeBranch?: string;
+  workDiffSession?: WorkDiffSession | null;
+  workDiffLoading?: boolean;
+  workDiffError?: string | null;
+  workDiffSource?: 'bridge' | 'iam' | null;
+  onRefreshWorkDiff?: (agentSummary?: string) => Promise<WorkDiffSession | null>;
 }
 
 export const WorkModeView: React.FC<WorkModeViewProps> = ({
@@ -93,6 +99,11 @@ export const WorkModeView: React.FC<WorkModeViewProps> = ({
   isAgentProcessing = false,
   activePath = '',
   activeBranch = 'main',
+  workDiffSession = null,
+  workDiffLoading = false,
+  workDiffError = null,
+  workDiffSource = null,
+  onRefreshWorkDiff,
 }) => {
   const [internalSubTab, setInternalSubTab] = useState<WorkSubTab>('workbench');
   const subTab = externalSubTab !== undefined ? externalSubTab : internalSubTab;
@@ -200,6 +211,11 @@ export const WorkModeView: React.FC<WorkModeViewProps> = ({
             isProcessing={isAgentProcessing}
             activePath={activePath}
             activeBranch={activeBranch}
+            workDiffSession={workDiffSession}
+            workDiffLoading={workDiffLoading}
+            workDiffError={workDiffError}
+            workDiffSource={workDiffSource}
+            onRefreshWorkDiff={onRefreshWorkDiff}
           />
         </div>
       ) : (

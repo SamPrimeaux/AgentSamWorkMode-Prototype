@@ -54,8 +54,11 @@ Monaco is **not** loaded in the WorkDiff path.
 - **Inspector → Review changes (N)** in `AgentSamWorkMode`
 - Mock session: `src/data/mockWorkDiffSession.ts` (Cloudflare PR #9 shape)
 
-## Wiring live data (next)
+## Wiring live data
 
-1. Agent completion emits `WorkDiffSession` (branch, files, diff hunks, commits).
-2. Replace `MOCK_WORK_DIFF_SESSION` with API/git bridge payload.
-3. `onSquashAndMerge` → `gh pr merge` or platform PR API.
+1. Agent completion calls `useWorkDiffSession().refresh(agentSummary)` in `App.tsx`.
+2. `fetchWorkDiffSession` loads unified diff from `agentsam-bridge` (`/api/bridge/git/*`) or IAM git + terminal exec.
+3. `buildWorkDiffSession` + `parseUnifiedDiff` map git output → `WorkDiffSession`.
+4. `AgentSamWorkMode` opens the mobile review UI with live file list and diff lines.
+
+Mock data remains in `src/data/mockWorkDiffSession.ts` for reference only.
