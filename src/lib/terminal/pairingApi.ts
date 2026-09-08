@@ -1,4 +1,4 @@
-import { apiFetch, getIamOrigin, getWorkspaceId, workspaceQuery } from '../apiClient';
+import { apiFetch, getIamOrigin } from '../apiClient';
 import type {
   PairClaimResponse,
   PairCompleteResponse,
@@ -6,21 +6,34 @@ import type {
   PairStatusResponse,
 } from './pairingTypes';
 
-function wsHeaders(workspaceId?: string | null): Record<string, string> {
-  const h: Record<string, string> = { 'Content-Type': 'application/json' };
-  const ws = (workspaceId || getWorkspaceId()).trim();
-  if (ws) h['X-IAM-Workspace-Id'] = ws;
-  return h;
+/**
+ * Transitional compatibility for older platform routes. Pairing belongs to the
+ * authenticated user/device; workspace_id is never inferred from Vite/browser state.
+ */
+function compatibilityHeaders(workspaceId?: string | null): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const ws = String(workspaceId || '').trim();
+  if (ws) headers['X-IAM-Workspace-Id'] = ws;
+  return headers;
+}
+
+function compatibilityQuery(workspaceId?: string | null): URLSearchParams {
+  const params = new URLSearchParams();
+  const ws = String(workspaceId || '').trim();
+  if (ws) params.set('workspace_id', ws);
+  return params;
 }
 
 export async function startDevicePairing(
+  /** @deprecated Compatibility hint only; pairing identity is authenticated user + device. */
   workspaceId?: string | null,
   body?: { device_name?: string; platform?: string },
 ): Promise<PairStartResponse | null> {
-  const q = workspaceQuery(workspaceId);
-  const res = await apiFetch<PairStartResponse>(`/api/terminal/pair/start?${q}`, {
+  const q = compatibilityQuery(workspaceId);
+  const suffix = q.toString();
+  const res = await apiFetch<PairStartResponse>(`/api/terminal/pair/start${suffix ? `?${suffix}` : ''}`, {
     method: 'POST',
-    headers: wsHeaders(workspaceId),
+    headers: compatibilityHeaders(workspaceId),
     body: JSON.stringify(body || {}),
   });
   return res.ok ? res.data : null;
@@ -28,25 +41,31 @@ export async function startDevicePairing(
 
 export async function fetchPairingStatus(
   pairId: string,
+  /** @deprecated Compatibility hint only. */
   workspaceId?: string | null,
 ): Promise<PairStatusResponse | null> {
-  const q = new URLSearchParams(workspaceQuery(workspaceId));
+  const q = compatibilityQuery(workspaceId);
   q.set('pair_id', pairId);
   const res = await apiFetch<PairStatusResponse>(`/api/terminal/pair/status?${q.toString()}`, {
-    headers: wsHeaders(workspaceId),
+    headers: compatibilityHeaders(workspaceId),
   });
   return res.ok ? res.data : null;
 }
 
 export async function cancelDevicePairing(
   pairId: string,
+  /** @deprecated Compatibility hint only. */
   workspaceId?: string | null,
 ): Promise<boolean> {
-  const q = workspaceQuery(workspaceId);
-  const res = await apiFetch<{ ok: boolean }>(`/api/terminal/pair/${encodeURIComponent(pairId)}?${q}`, {
-    method: 'DELETE',
-    headers: wsHeaders(workspaceId),
-  });
+  const q = compatibilityQuery(workspaceId);
+  const suffix = q.toString();
+  const res = await apiFetch<{ ok: boolean }>(
+    `/api/terminal/pair/${encodeURIComponent(pairId)}${suffix ? `?${suffix}` : ''}`,
+    {
+      method: 'DELETE',
+      headers: compatibilityHeaders(workspaceId),
+    },
+  );
   return res.ok && res.data.ok === true;
 }
 

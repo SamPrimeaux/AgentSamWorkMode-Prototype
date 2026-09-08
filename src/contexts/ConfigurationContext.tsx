@@ -1,14 +1,15 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
+import React, { createContext, useContext, useMemo, useState, ReactNode } from 'react';
 import { AppConfig, ModelChoice } from '../types';
 
 /**
- * Resolves initial configuration by inspecting client-accessible environment variables
- * (with Vite `import.meta.env` support) and applying deterministic production defaults.
+ * Resolves deployment/config defaults from client-accessible environment variables.
+ * These values are defaults only; browser storage is not an identity, repo, tenant,
+ * connection, or execution authority.
  */
 export function getEnvironmentConfig(): AppConfig {
   const env = (typeof import.meta !== 'undefined' && import.meta.env) ? import.meta.env : ({} as any);
 
-  const envMode: 'development' | 'production' | 'test' | 'preview' = 
+  const envMode: 'development' | 'production' | 'test' | 'preview' =
     env.MODE === 'test' ? 'test' :
     env.MODE === 'development' || env.DEV ? 'development' :
     'production';
@@ -40,7 +41,50 @@ export function getEnvironmentConfig(): AppConfig {
   };
 }
 
-const STORAGE_KEY = 'agentsam_dynamic_config_overrides';
+/**
+ * Only harmless user/device preferences belong here. Runtime/context fields such as
+ * tenant, branch, path, ExecOS URLs, developer identity, etc. stay in memory or come
+ * from the authenticated/server runtime.
+ */
+const PREFERENCES_STORAGE_KEY = 'agentsam_user_preferences_v1';
+const LEGACY_OVERRIDES_STORAGE_KEY = 'agentsam_dynamic_config_overrides';
+
+type PersistedConfigPreferences = Pick<AppConfig, 'defaultModel'>;
+
+function readPersistedPreferences(): Partial<PersistedConfigPreferences> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const current = localStorage.getItem(PREFERENCES_STORAGE_KEY);
+    if (current) return JSON.parse(current) as Partial<PersistedConfigPreferences>;
+
+    // One-way migration: salvage only the preference field from the old whole-config blob.
+    const legacy = localStorage.getItem(LEGACY_OVERRIDES_STORAGE_KEY);
+    if (!legacy) return {};
+    const parsed = JSON.parse(legacy) as Partial<AppConfig>;
+    const migrated: Partial<PersistedConfigPreferences> = {};
+    if (parsed.defaultModel) migrated.defaultModel = parsed.defaultModel;
+    if (migrated.defaultModel) {
+      localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(migrated));
+    }
+    localStorage.removeItem(LEGACY_OVERRIDES_STORAGE_KEY);
+    return migrated;
+  } catch (err) {
+    console.warn('Failed to parse cached user preferences', err);
+    return {};
+  }
+}
+
+function persistPreferences(config: AppConfig): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const persisted: PersistedConfigPreferences = {
+      defaultModel: config.defaultModel,
+    };
+    localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(persisted));
+  } catch {
+    // Browser storage is an optimization only; config remains usable in memory.
+  }
+}
 
 interface ConfigurationContextType {
   config: AppConfig;
@@ -59,67 +103,56 @@ export interface ConfigurationProviderProps {
   initialOverrides?: Partial<AppConfig>;
 }
 
-export const ConfigurationProvider: React.FC<ConfigurationProviderProps> = ({ 
+export const ConfigurationProvider: React.FC<ConfigurationProviderProps> = ({
   children,
-  initialOverrides 
+  initialOverrides,
 }) => {
-  const [config, setConfig] = useState<AppConfig>(() => {
-    const base = getEnvironmentConfig();
-    if (typeof window !== 'undefined') {
-      try {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          return { ...base, ...parsed, ...initialOverrides };
-        }
-      } catch (err) {
-        console.warn('Failed to parse cached configuration overrides', err);
-      }
-    }
-    return { ...base, ...initialOverrides };
-  });
+  const [config, setConfig] = useState<AppConfig>(() => ({
+    ...getEnvironmentConfig(),
+    ...readPersistedPreferences(),
+    ...initialOverrides,
+  }));
 
   const updateConfig = (updates: Partial<AppConfig>) => {
     setConfig((prev) => {
       const next = { ...prev, ...updates };
-      try {
-        if (typeof window !== 'undefined') {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-        }
-      } catch {}
+      persistPreferences(next);
       return next;
     });
   };
 
   const resetConfig = () => {
-    const base = getEnvironmentConfig();
+    const base = { ...getEnvironmentConfig(), ...initialOverrides };
     try {
       if (typeof window !== 'undefined') {
-        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(PREFERENCES_STORAGE_KEY);
+        localStorage.removeItem(LEGACY_OVERRIDES_STORAGE_KEY);
       }
     } catch {}
     setConfig(base);
   };
 
+  /** Compatibility setters: these update current in-memory view/runtime context only. */
   const setActiveTenant = (activeTenant: string) => {
-    updateConfig({ activeTenant });
+    setConfig((prev) => ({ ...prev, activeTenant }));
   };
 
   const setActiveBranch = (defaultBranch: string) => {
-    updateConfig({ defaultBranch });
+    setConfig((prev) => ({ ...prev, defaultBranch }));
   };
 
   const setActivePath = (defaultPath: string) => {
-    updateConfig({ defaultPath });
+    setConfig((prev) => ({ ...prev, defaultPath }));
   };
 
   const updateDeveloperProfile = (name: string, email: string, initials?: string) => {
-    const derivedInitials = initials || name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'DV';
-    updateConfig({
+    const derivedInitials = initials || name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase() || 'DV';
+    setConfig((prev) => ({
+      ...prev,
       developerName: name,
       developerEmail: email,
       developerInitials: derivedInitials,
-    });
+    }));
   };
 
   const contextValue = useMemo<ConfigurationContextType>(() => ({
@@ -129,7 +162,7 @@ export const ConfigurationProvider: React.FC<ConfigurationProviderProps> = ({
     setActiveTenant,
     setActiveBranch,
     setActivePath,
-    updateDeveloperProfile
+    updateDeveloperProfile,
   }), [config]);
 
   return (
@@ -142,7 +175,6 @@ export const ConfigurationProvider: React.FC<ConfigurationProviderProps> = ({
 export function useConfiguration(): ConfigurationContextType {
   const context = useContext(ConfigurationContext);
   if (!context) {
-    // Fallback if rendered outside provider
     const fallbackConfig = getEnvironmentConfig();
     return {
       config: fallbackConfig,
